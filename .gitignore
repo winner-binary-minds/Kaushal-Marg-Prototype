@@ -1,0 +1,35 @@
+# Python & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Secrets & Environment variables
+.env
+.env.local
+secrets.toml
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test & Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# SQLite Databases & Local Runtime Data
+*.db
+*.sqlite
+*.sqlite3
+kaushal_marg.db
