@@ -108,17 +108,16 @@ class ExplanationGenerator:
 
         Args:
             api_key: Gemini API key. If None, reads from GEMINI_API_KEY env var.
-
-        Raises:
-            ValueError: If GeminiClient initialization fails.
         """
         try:
             self._gemini_client = GeminiClient(api_key=api_key, max_output_tokens=512)
-            logger.debug("ExplanationGenerator initialized successfully")
+            logger.debug("ExplanationGenerator initialized successfully with Gemini")
         except Exception as e:
-            raise ValueError(
-                f"Failed to initialize ExplanationGenerator: {str(e)}"
-            ) from e
+            logger.warning(
+                "Gemini API key not configured or client initialization failed (%s). Using template generator fallback.",
+                str(e)
+            )
+            self._gemini_client = None
 
     def generate_explanation(
         self,
@@ -129,18 +128,11 @@ class ExplanationGenerator:
         Generate a plain-language explanation of a recommendation result.
 
         Args:
-            recommendation_result: Dict returned by run_recommendation_pipeline().
-                Expected keys: 'profile', 'recommendations', 'skill_gaps', 'pathway'.
-                Missing keys are handled gracefully.
+            recommendation_result: Dict returned by run_recommendation_pipeline() or direct rec dict.
             language: Language code. Must be 'en', 'hi', or 'mr'. Defaults to 'en'.
 
         Returns:
             A short, beneficiary-friendly narrative string.
-            Returns a safe fallback message if no usable data is present or
-            if language is unsupported.
-
-        Raises:
-            GeminiAPIError: If the Gemini API call fails (propagated explicitly).
         """
         # Normalise and validate language — fall back silently to English
         if not isinstance(language, str) or language.strip() not in _SUPPORTED_LANGUAGES:
@@ -164,6 +156,10 @@ class ExplanationGenerator:
             logger.debug("No usable recommendation data; returning fallback message")
             return _FALLBACK_MESSAGES[language]
 
+        # If Gemini client is not initialized, generate formatted template explanation
+        if self._gemini_client is None:
+            return self._generate_template_explanation(summary_data, language)
+
         # Build the prompt
         prompt = self._build_prompt(summary_data, language)
 
@@ -171,9 +167,9 @@ class ExplanationGenerator:
             explanation = self._gemini_client.generate_text(prompt)
             logger.debug("Explanation generated successfully")
             return explanation
-        except GeminiAPIError:
-            logger.error("Gemini API error during explanation generation")
-            raise
+        except Exception as e:
+            logger.warning("Gemini text generation failed (%s); using template fallback.", str(e))
+            return self._generate_template_explanation(summary_data, language)
 
     # ------------------------------------------------------------------ #
     # Private helpers                                                      #
@@ -195,39 +191,45 @@ class ExplanationGenerator:
         facts: dict = {"has_data": False}
 
         # --- Top recommendation ---
-        recommendations = result.get("recommendations") or []
-        if recommendations and isinstance(recommendations, list):
-            top = recommendations[0]
-            if isinstance(top, dict):
-                job_role = top.get("job_role") or ""
-                sector = top.get("sector") or ""
-                score = top.get("score")
-                employment_type = top.get("employment_type") or ""
-                matched_skills = top.get("matched_skills") or []
-                missing_skills = top.get("missing_skills") or []
-                skill_coverage = top.get("skill_coverage")
-                local_opportunity = top.get("local_opportunity") or ""
-                why_recommended = top.get("why_recommended") or []
+        if "job_role" in result:
+            top = result
+        else:
+            recommendations = result.get("recommendations") or []
+            top = recommendations[0] if (recommendations and isinstance(recommendations, list)) else {}
 
-                if job_role:
-                    facts["has_data"] = True
-                    facts["job_role"] = job_role
-                if sector:
-                    facts["sector"] = sector
-                if score is not None:
-                    facts["score"] = score
-                if employment_type:
-                    facts["employment_type"] = employment_type
-                if matched_skills:
-                    facts["matched_skills"] = matched_skills
-                if missing_skills:
-                    facts["missing_skills"] = missing_skills
-                if skill_coverage is not None:
-                    facts["skill_coverage"] = skill_coverage
-                if local_opportunity and "no verified" not in local_opportunity.lower():
-                    facts["local_opportunity"] = local_opportunity
-                if why_recommended:
-                    facts["why_recommended"] = why_recommended
+        if isinstance(top, dict) and top:
+            job_role = top.get("job_role") or ""
+            sector = top.get("sector") or ""
+            nsqf_level = top.get("nsqf_level") or ""
+            score = top.get("score")
+            employment_type = top.get("employment_type") or ""
+            matched_skills = top.get("matched_skills") or []
+            missing_skills = top.get("missing_skills") or []
+            skill_coverage = top.get("skill_coverage")
+            local_opportunity = top.get("local_opportunity") or ""
+            why_recommended = top.get("why_recommended") or []
+
+            if job_role:
+                facts["has_data"] = True
+                facts["job_role"] = job_role
+            if sector:
+                facts["sector"] = sector
+            if nsqf_level:
+                facts["nsqf_level"] = nsqf_level
+            if score is not None:
+                facts["score"] = score
+            if employment_type:
+                facts["employment_type"] = employment_type
+            if matched_skills:
+                facts["matched_skills"] = matched_skills
+            if missing_skills:
+                facts["missing_skills"] = missing_skills
+            if skill_coverage is not None:
+                facts["skill_coverage"] = skill_coverage
+            if local_opportunity and "no verified" not in local_opportunity.lower():
+                facts["local_opportunity"] = local_opportunity
+            if why_recommended:
+                facts["why_recommended"] = why_recommended
 
         # --- Skill gap summary ---
         skill_gaps = result.get("skill_gaps") or {}
@@ -244,6 +246,47 @@ class ExplanationGenerator:
                 facts["target_role"] = target_role["job_role"]
 
         return facts
+
+    def _generate_template_explanation(self, facts: dict, language: str) -> str:
+        """Generates a structured, beneficiary-friendly template narrative."""
+        role = facts.get("job_role", "Target Role")
+        sector = facts.get("sector", "Skilling")
+        nsqf = facts.get("nsqf_level", "Unknown")
+        score = facts.get("score", 0)
+        matched = ", ".join(facts.get("matched_skills", [])) or ("None" if language == "en" else ("कोई नहीं" if language == "hi" else "काहीही नाही"))
+        missing = ", ".join(facts.get("missing_skills", [])) or ("None" if language == "en" else ("कोई नहीं" if language == "hi" else "काहीही नाही"))
+        local_opp = facts.get("local_opportunity", "No verified data" if language == "en" else ("कोई सत्यापित डेटा नहीं" if language == "hi" else "कोणताही सत्यापित डेटा नाही"))
+
+        if language == "hi":
+            return (
+                f"**अनुशंसित भूमिका:** {role}\n\n"
+                f"**क्षेत्र:** {sector}\n\n"
+                f"**NSQF स्तर:** {nsqf}\n\n"
+                f"**स्कोर:** {score}%\n\n"
+                f"**मिलान कौशल्य:** {matched}\n\n"
+                f"**आवश्यक प्रशिक्षण:** {missing}\n\n"
+                f"**स्थानीय अवसर:** {local_opp}"
+            )
+        elif language == "mr":
+            return (
+                f"**शिफारस केलेली भूमिका:** {role}\n\n"
+                f"**क्षेत्र:** {sector}\n\n"
+                f"**NSQF स्तर:** {nsqf}\n\n"
+                f"**स्कोर:** {score}%\n\n"
+                f"**जुळलेले कौशल्ये:** {matched}\n\n"
+                f"**आवश्यक कौशल्ये:** {missing}\n\n"
+                f"**स्थानिक संधी:** {local_opp}"
+            )
+        else:
+            return (
+                f"**Recommended Role:** {role}\n\n"
+                f"**Sector:** {sector}\n\n"
+                f"**NSQF Level:** {nsqf}\n\n"
+                f"**Match Score:** {score}%\n\n"
+                f"**Matched Skills:** {matched}\n\n"
+                f"**Missing Skills:** {missing}\n\n"
+                f"**Local Opportunity:** {local_opp}"
+            )
 
     def _build_prompt(self, facts: dict, language: str) -> str:
         """

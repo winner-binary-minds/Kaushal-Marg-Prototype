@@ -1,80 +1,188 @@
 """
 Kaushal Marg - Recommendation Results Page
 Displays Top 3 NSQF-aligned job roles, match percentage, rationale, skill gaps,
-local district opportunities, livelihood pathway ('My Skill Journey'), and employment suitability.
+local district opportunities, livelihood pathway ('My Skill Journey'), and speech synthesis read-aloud.
 
 Team: Binary Minds | SIH Problem Statement 26097
 """
 
 import streamlit as st
 import pandas as pd
+import json
+import logging
+import html
 from typing import Dict, Any, List
 
+# Person 2 (Recommendation Engine)
 from recommendation.matcher import recommend_jobs, load_nsqf_jobs
 from recommendation.pathway import generate_skill_pathway
+from recommendation.skill_gap import analyze_skill_gap
+
+# Person 1 (AI Explanation & Voice TTS)
+from ai.explanation import ExplanationGenerator
+from voice.tts import TTSEngine
+
+# Person 3 (Database & Demo Profiles)
+from database.database import (
+    save_recommendations_batch,
+    create_beneficiary,
+    save_profile
+)
+from data.demo_profiles import SYNTHETIC_BENEFICIARY_PROFILES
+
+
+def render_tts_widget(text: str, lang_code: str, widget_id: str, button_label: str = "🔊 Listen to Summary / सारांश सुनें"):
+    """Renders a browser SpeechSynthesis button."""
+    tts = TTSEngine()
+    cfg = tts.prepare_utterance(text, language=lang_code)
+    escaped = json.dumps(cfg.text)
+    
+    js = f"""
+        <script>
+            function getSynth() {{
+                var synth = null;
+                try {{
+                    if (window.parent && window.parent.speechSynthesis) {{
+                        synth = window.parent.speechSynthesis;
+                    }}
+                }} catch (e) {{
+                    // CORS restricted, fallback
+                }}
+                if (!synth && window.speechSynthesis) {{
+                    synth = window.speechSynthesis;
+                }}
+                return synth;
+            }}
+            
+            function speak_{widget_id}() {{
+                var synth = getSynth();
+                if (synth) {{
+                    synth.cancel();
+                    var u = new SpeechSynthesisUtterance({escaped});
+                    u.lang = '{cfg.lang}';
+                    u.rate = {cfg.rate};
+                    u.pitch = {cfg.pitch};
+                    synth.speak(u);
+                }} else {{
+                    alert('Browser speech synthesis is not supported on this device.');
+                }}
+            }}
+            
+            window.onload = function() {{
+                if (!getSynth()) {{
+                    var btn = document.getElementById('btn_{widget_id}');
+                    if (btn) {{
+                        btn.disabled = true;
+                        btn.innerText = '🚫 TTS Unsupported';
+                        btn.title = 'Your browser does not support Speech Synthesis';
+                        btn.style.opacity = '0.5';
+                        btn.style.cursor = 'not-allowed';
+                    }}
+                }}
+            }};
+        </script>
+        <button id="btn_{widget_id}" onclick="speak_{widget_id}()" style="background:#2563EB; border:none; color:#FFFFFF; font-weight:600; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.95rem;">
+            {button_label}
+        </button>
+    """
+    st.components.v1.html(js, height=50)
 
 
 def render_recommendations_page():
     """Renders the transparent, accessible NSQF recommendations and pathway view."""
     
-    # -------------------------------------------------------------
-    # 1. Header & Context
-    # -------------------------------------------------------------
-    head_col1, head_col2 = st.columns([3, 1])
-    with head_col1:
-        st.markdown("""
-            <div style="margin-bottom: 10px;">
-                <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
-                    🎯 आपके लिए सरकारी हुनर और रोज़गार | Recommended Pathways
-                </h1>
-                <p style="color: #4B5563; font-size: 1.05rem; margin: 4px 0 0 0;">
-                    NSQF-Aligned Skilling Recommendations & "My Skill Journey" under PM-AJAY (GIA Component)
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
+    active_lang_code = st.session_state.get("selected_lang_code", "hi")
     
+    # -------------------------------------------------------------
+    # 1. Header & Language Selection
+    # -------------------------------------------------------------
+    head_col1, head_col2 = st.columns([2.8, 1.2])
+    with head_col1:
+        if active_lang_code == "hi":
+            st.markdown("""
+                <div style="margin-bottom: 8px;">
+                    <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
+                        🎯 आपके लिए सरकारी हुनर और रोज़गार | Recommended Pathways
+                    </h1>
+                    <p style="color: #4B5563; font-size: 1.05rem; margin: 4px 0 0 0;">
+                        NSQF-Aligned Skilling Recommendations & "My Skill Journey" under PM-AJAY (GIA Component)
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        elif active_lang_code == "mr":
+            st.markdown("""
+                <div style="margin-bottom: 8px;">
+                    <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
+                        🎯 आपल्यासाठी सरकारी कौशल्य व रोजगार | Recommended Pathways
+                    </h1>
+                    <p style="color: #4B5563; font-size: 1.05rem; margin: 4px 0 0 0;">
+                        NSQF-Aligned Skilling Recommendations & "My Skill Journey" under PM-AJAY (GIA Component)
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+                <div style="margin-bottom: 8px;">
+                    <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
+                        🎯 Your NSQF Skilling & Livelihood Pathways
+                    </h1>
+                    <p style="color: #4B5563; font-size: 1.05rem; margin: 4px 0 0 0;">
+                        Official Sector Skill Council Recommendations & 4-Stage Pathway under PM-AJAY (GIA Component)
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+
     with head_col2:
-        lang = st.session_state.get("beneficiary_lang", "हिंदी")
-        lang_choice = st.radio(
+        lang_opts = ["🇮🇳 हिंदी", "🇬🇧 English", "🇮🇳 मराठी"]
+        l_map = {"🇮🇳 हिंदी": "hi", "🇬🇧 English": "en", "🇮🇳 मराठी": "mr"}
+        inv_map = {v: k for k, v in l_map.items()}
+        cur_lbl = inv_map.get(active_lang_code, "🇮🇳 हिंदी")
+        
+        chosen_lbl = st.radio(
             "Language / भाषा:",
-            options=["🇮🇳 हिंदी", "🇬🇧 English"],
-            index=0 if lang == "हिंदी" else 1,
+            options=lang_opts,
+            index=lang_opts.index(cur_lbl),
             horizontal=True,
-            key="recs_lang_radio"
+            key="rec_lang_radio"
         )
-        is_hindi = "हिंदी" in lang_choice
-        st.session_state["beneficiary_lang"] = "हिंदी" if is_hindi else "English"
+        new_code = l_map[chosen_lbl]
+        if new_code != active_lang_code:
+            st.session_state["selected_lang_code"] = new_code
+            st.rerun()
 
-    st.markdown("<hr style='margin: 12px 0 20px 0;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin: 10px 0 18px 0;'>", unsafe_allow_html=True)
 
     # -------------------------------------------------------------
-    # 2. Active Beneficiary Profile & Sample Selector
+    # PROTOTYPE DATA SOURCE NOTICE
     # -------------------------------------------------------------
-    # Retrieve profile from session state or use default demo profile
-    profile = st.session_state.get("demo_profile", {
-        "name": "रमेश कुमार (Ramesh Kumar)",
-        "education": "10th Pass",
-        "skills": ["Tractor operation", "Basic farming"],
-        "interests": ["Agriculture", "Machinery"],
-        "district": "Indore",
-        "mobility": "Low (District Level)",
-        "employment_preference": "Self-Employment (GIA PM-AJAY)"
-    })
+    st.info("ℹ️ **Data Source / Prototype Notice:** The district opportunities and NSQF mappings displayed are Prototype Demo Data designed for the SIH 26097 evaluation. This is not a live government API.")
 
-    # Profile Bar
+    # -------------------------------------------------------------
+    # 2. Active Beneficiary Profile & Evaluated Context
+    # -------------------------------------------------------------
+    # Fallback to an empty dictionary instead of synthetic defaults
+    default_p = st.session_state.get("demo_profile", {})
+    profile = st.session_state.get("extracted_profile") or default_p
+
+    # Profile Summary Banner
     with st.container():
+        safe_name = html.escape(str(profile.get('name') or 'Unknown'))
+        safe_edu = html.escape(str(profile.get('education') or 'None'))
+        safe_dist = html.escape(str(profile.get('district') or 'None'))
+        safe_skills = html.escape(', '.join(profile.get('skills', [])) if profile.get('skills') else 'None')
+        safe_pref = html.escape(str(profile.get('employment_preference') or 'Unknown'))
         st.markdown(f"""
             <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-left: 5px solid #3B82F6; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                     <div>
                         <h4 style="color: #1E3A8A; margin: 0 0 4px 0;">
-                            👤 {'मूल्यांकित लाभार्थी प्रोफ़ाइल' if is_hindi else 'Evaluated Beneficiary Profile'}: <b>{profile.get('name', 'Beneficiary')}</b>
+                            👤 {'मूल्यांकित लाभार्थी प्रोफ़ाइल' if active_lang_code == 'hi' else ('तपासलेली लाभार्थी माहिती' if active_lang_code == 'mr' else 'Evaluated Beneficiary Profile')}: <b>{safe_name}</b>
                         </h4>
                         <span style="color: #475569; font-size: 0.95rem;">
-                            🎓 <b>{'शिक्षा' if is_hindi else 'Education'}:</b> {profile.get('education', 'N/A')} &nbsp;|&nbsp; 
-                            📍 <b>{'ज़िला' if is_hindi else 'District'}:</b> {profile.get('district', 'N/A')} &nbsp;|&nbsp; 
-                            🛠️ <b>{'वर्तमान हुनर' if is_hindi else 'Current Skills'}:</b> {', '.join(profile.get('skills', [])) if profile.get('skills') else 'None'} &nbsp;|&nbsp; 
-                            💼 <b>{'पसंद' if is_hindi else 'Goal'}:</b> {profile.get('employment_preference', profile.get('preference', 'Self-Employment'))}
+                            🎓 <b>{'शिक्षा' if active_lang_code != 'en' else 'Education'}:</b> {safe_edu} &nbsp;|&nbsp; 
+                            📍 <b>{'ज़िला/स्थान' if active_lang_code != 'en' else 'District'}:</b> {safe_dist} &nbsp;|&nbsp; 
+                            🛠️ <b>{'हुनर' if active_lang_code != 'en' else 'Skills'}:</b> {safe_skills} &nbsp;|&nbsp; 
+                            💼 <b>{'पसंद' if active_lang_code != 'en' else 'Goal'}:</b> {safe_pref}
                         </span>
                     </div>
                 </div>
@@ -82,9 +190,7 @@ def render_recommendations_page():
         """, unsafe_allow_html=True)
 
     # 10 Synthetic Demo Profile Switcher
-    st.markdown(f"##### {'🔄 10 नमूना प्रोफ़ाइल के अवसर देखें (Switch from 10 Demo Profiles):' if is_hindi else '🔄 Switch from 10 Synthetic Demo Profiles:'}")
-    
-    from data.demo_profiles import SYNTHETIC_BENEFICIARY_PROFILES
+    st.markdown(f"##### {'🔄 10 नमूना प्रोफ़ाइल के अवसर देखें (Switch from 10 Demo Profiles):' if active_lang_code == 'hi' else ('🔄 10 नमुना प्रोफाईल तपासा (Switch Demo Profile):' if active_lang_code == 'mr' else '🔄 Switch from 10 Synthetic Demo Profiles:')}")
     
     recs_demo_labels = [
         f"{p['name']} ({p['domain_tag']} • {p['district']} • {p['employment_preference']})"
@@ -101,241 +207,316 @@ def render_recommendations_page():
             label_visibility="collapsed"
         )
     with sw_col2:
-        if st.button("🚀 " + ("यह प्रोफ़ाइल देखें / Evaluate" if is_hindi else "Evaluate Profile"), key="btn_eval_demo_profile", use_container_width=True):
+        if st.button("🚀 " + ("यह प्रोफ़ाइल देखें / Evaluate" if active_lang_code != 'en' else "Evaluate Profile"), key="btn_eval_demo_profile", use_container_width=True):
             p_sel = SYNTHETIC_BENEFICIARY_PROFILES[selected_rec_idx]
-            st.session_state["demo_profile"] = {
+            new_p = {
                 "name": p_sel["name"],
                 "education": p_sel["education"],
-                "skills": p_sel["skills"],
-                "interests": p_sel["interests"],
+                "skills": list(p_sel["skills"]),
+                "interests": list(p_sel["interests"]),
                 "district": p_sel["district"],
                 "mobility": p_sel["mobility"],
                 "employment_preference": p_sel["employment_preference"]
             }
+            st.session_state["extracted_profile"] = new_p
+            st.session_state["demo_profile"] = new_p
             st.rerun()
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # -------------------------------------------------------------
-    # 3. Execute Pure Recommendation Algorithm
+    # 3. Generate NSQF Recommendations (Deterministic Engine)
     # -------------------------------------------------------------
-    # Call the unmodified deterministic matcher
-    top_recommendations = recommend_jobs(profile, top_n=3)
+    recommendations = recommend_jobs(profile, top_n=3)
 
-    if not top_recommendations:
-        st.warning("⚠️ No NSQF job role recommendations found. Please verify the profile details.")
+    if not recommendations:
+        st.warning("⚠️ " + (
+            "हमें उपयुक्त मार्ग की अनुशंसा करने के लिए और जानकारी की आवश्यकता है। कृपया अपने कौशल, शिक्षा या रुचियों के बारे में अधिक विवरण प्रदान करें।" if active_lang_code == 'hi' else
+            ("आम्हाला योग्य मार्गाची शिफारस करण्यासाठी अधिक माहितीची आवश्यकता आहे. कृपया तुमचे कौशल्य, शिक्षण किंवा आवडीबद्दल अधिक माहिती द्या." if active_lang_code == 'mr' else
+            "We need more information to recommend a suitable pathway. Please provide more details about your skills, education, or interests.")
+        ))
         return
 
-    # Load raw NSQF dataset to cross-reference full metadata for pathway generator
-    all_jobs_raw = load_nsqf_jobs()
-    jobs_map = {job["job_role"].strip().lower(): job for job in all_jobs_raw}
+    top_1 = recommendations[0]
+    
+    # Handle Need More Information fallback UX
+    if top_1.get("status") == "insufficient_information":
+        st.warning("⚠️ **More information is needed to make a reliable recommendation.**")
+        st.markdown("### Missing Profile Information:")
+        
+        missing_info = top_1.get("missing_information", {})
+        
+        # Render a simple visual summary of what's known vs missing
+        for key, val in missing_info.items():
+            if val == "missing":
+                disp_key = key.replace('_', ' ').title()
+                st.markdown(f"<span style='color:#b91c1c'>❌ <b>{disp_key}</b>: MISSING</span>", unsafe_allow_html=True)
+
+        st.markdown("<br>Please update your profile to provide the missing details so we can recommend an appropriate pathway.", unsafe_allow_html=True)
+            
+        if st.button("⬅️ Update Profile & Try Again", use_container_width=True, type="primary"):
+            st.session_state["beneficiary_step"] = 2
+            st.rerun()
+        return
+
+    # Handle No Strong Match UX
+    if top_1.get("status") == "no_strong_match":
+        st.warning("⚠️ **No strong match found in the current NSQF prototype dataset.**")
+        st.markdown("The current prototype dataset does not contain a sufficiently aligned role for this profile. No unrelated role was recommended.")
+        if st.button("⬅️ Back to Profile", use_container_width=True, type="primary"):
+            st.session_state["beneficiary_step"] = 2
+            st.rerun()
+        return
+
+    top_2 = recommendations[1] if len(recommendations) > 1 else None
+    top_3 = recommendations[2] if len(recommendations) > 2 else None
 
     # -------------------------------------------------------------
-    # 4. Display Top 3 Recommendations
+    # 4. Plain-Language Explanation & Speech Read-Aloud
     # -------------------------------------------------------------
-    st.subheader(f"🏆 {'आपके लिए शीर्ष 3 अनुशंसित NSQF जॉब रोल' if is_hindi else 'Top 3 NSQF-Aligned Job Recommendations'}")
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("💡 " + ("अनुशंसा सारांश और मार्गदर्शन (Recommendation Narrative)" if active_lang_code == 'hi' else ("शिफारस सारांश व मार्गदर्शन (Recommendation Narrative)" if active_lang_code == 'mr' else "AI Summary & Recommendation Narrative")))
+    
+    # Initialize cache for explanation
+    exp_key = f"exp_{top_1['job_role']}_{active_lang_code}"
+    if exp_key not in st.session_state:
+        st.session_state[exp_key] = None
 
-    rank_colors = [
-        {"border": "#16A34A", "bg_badge": "#DCFCE7", "text_badge": "#166534", "label": "🥇 #1 Best Fit / सर्वोत्तम चयन"},
-        {"border": "#2563EB", "bg_badge": "#DBEAFE", "text_badge": "#1E40AF", "label": "🥈 #2 Strong Match / उत्तम चयन"},
-        {"border": "#9333EA", "bg_badge": "#F3E8FF", "text_badge": "#6B21A8", "label": "🥉 #3 Alternative Match / वैकल्पिक चयन"}
-    ]
+    if st.session_state[exp_key] is None:
+        if st.button("✨ " + ("AI सारांश जनरेट करें / Generate AI Summary" if active_lang_code == 'hi' else ("AI सारांश तयार करा / Generate AI Summary" if active_lang_code == 'mr' else "Generate AI Summary"))):
+            with st.spinner("Generating summary..."):
+                try:
+                    exp_gen = ExplanationGenerator()
+                    st.session_state[exp_key] = exp_gen.generate_explanation(
+                        recommendation_result=top_1,
+                        language=active_lang_code
+                    )
+                except Exception as e:
+                    from ai.gemini import GeminiQuotaError
+                    if isinstance(e, GeminiQuotaError) or "429" in str(e) or "quota" in str(e).lower():
+                        st.session_state[exp_key] = f"⚠️ Gemini API Quota Exceeded. Please try again later. Deterministic summary: You are recommended for {top_1['job_role']} as a {top_1['employment_type']} in {top_1['sector']}."
+                    else:
+                        st.error(f"Error generating explanation: {e}")
+            st.rerun()
+        else:
+            # Deterministic fallback text
+            fallback = (
+                f"आपको {top_1['sector']} क्षेत्र में {top_1['employment_type']} के लिए {top_1['job_role']} (स्तर {top_1.get('nsqf_level', 4)}) की अनुशंसा की जाती है।" if active_lang_code == 'hi' else
+                f"तुम्हाला {top_1['sector']} क्षेत्रात {top_1['employment_type']} साठी {top_1['job_role']} (स्तर {top_1.get('nsqf_level', 4)}) ची शिफारस केली जाते." if active_lang_code == 'mr' else
+                f"You are highly recommended for the {top_1['job_role']} role (Level {top_1.get('nsqf_level', 4)}) in the {top_1['sector']} sector for {top_1['employment_type']}."
+            )
+            st.info(fallback)
+            explanation_text = fallback
+    else:
+        explanation_text = st.session_state[exp_key]
+        st.info(explanation_text)
 
-    for idx, rec in enumerate(top_recommendations):
-        style = rank_colors[idx] if idx < len(rank_colors) else rank_colors[-1]
-        score_val = int(round(rec.get("score", 0)))
-        role_title = rec.get("job_role", "")
-        sector_name = rec.get("sector", "")
-        matched_skills = rec.get("matched_skills", [])
-        missing_skills = rec.get("missing_skills", [])
-        emp_type = rec.get("employment_type", "Self-Employment")
-        why_list = rec.get("why_recommended", [])
-        local_opp_info = rec.get("local_opportunity", "")
-        local_opp_details = rec.get("local_opportunity_details", None)
+    # Audio Read-Aloud Button
+    tts_btn_label = "🔊 यह सारांश सुनें (Listen to Summary)" if active_lang_code == 'hi' else ("🔊 हा सारांश ऐका (Listen to Summary)" if active_lang_code == 'mr' else "🔊 Listen Aloud to Summary")
+    render_tts_widget(explanation_text, active_lang_code, "rec_summary", tts_btn_label)
 
-        # Lookup raw job to get exact NSQF Level and minimum education
-        raw_job = jobs_map.get(role_title.strip().lower(), {})
-        nsqf_lvl = raw_job.get("nsqf_level", "4")
-        min_edu = raw_job.get("minimum_education", "8th Pass")
-        self_suitability = raw_job.get("self_employment_suitability", "High")
+    # -------------------------------------------------------------
+    # 5. Top 3 NSQF Recommendations Display
+    # -------------------------------------------------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("🏆 " + ("शीर्ष 3 NSQF-संरेखित हुनर (Top 3 NSQF Job Roles)" if active_lang_code == 'hi' else ("सर्वोत्कृष्ट ३ NSQF-संरेखित कौशल्ये (Top 3 NSQF Roles)" if active_lang_code == 'mr' else "Top 3 NSQF-Aligned Job Recommendations")))
 
-        # Top Card Container
+    col_r1, col_r2, col_r3 = st.columns(3)
+
+    # RANK #1 CARD (Featured)
+    with col_r1:
         st.markdown(f"""
-            <div style="background:#FFFFFF; border: 2px solid {style['border']}; border-radius: 12px; padding: 22px; margin-bottom: 22px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <!-- Header with Title and Match Score -->
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
-                    <div>
-                        <span style="font-size: 0.85rem; font-weight: 700; color: {style['text_badge']}; text-transform: uppercase;">
-                            {style['label']}
-                        </span>
-                        <h2 style="color: #0F172A; margin: 4px 0 0 0; font-size: 1.55rem;">
-                            {role_title}
-                        </h2>
-                    </div>
-                    <div style="text-align: right; margin-top: 6px;">
-                        <span style="background: {style['bg_badge']}; color: {style['text_badge']}; font-weight: 700; padding: 8px 18px; border-radius: 24px; font-size: 1.25rem; border: 1px solid {style['border']};">
-                            🎯 {score_val}% {'अनुकूल' if is_hindi else 'Match Score'}
-                        </span>
-                    </div>
+            <div style="background: #FFFFFF; border: 2px solid #2563EB; border-top: 6px solid #2563EB; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                <div style="background: #EFF6FF; color: #1E40AF; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+                    🥇 {'शीर्ष 1 चयन / Rank #1 Fit' if active_lang_code != 'en' else '🥇 Rank #1 Best Match'}
                 </div>
-
-                <!-- Metadata Row -->
-                <div style="background: #F8FAFC; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.95rem; color: #334155;">
-                    🏢 <b>{'क्षेत्र (Sector)' if is_hindi else 'Sector'}:</b> {sector_name} &nbsp;|&nbsp; 
-                    🎖️ <b>NSQF Level:</b> Level {nsqf_lvl} &nbsp;|&nbsp; 
-                    🎓 <b>{'न्यूनतम शिक्षा' if is_hindi else 'Min Education'}:</b> {min_edu} &nbsp;|&nbsp; 
-                    💼 <b>{'रोज़गार प्रकार' if is_hindi else 'Suitability'}:</b> {emp_type} ({'स्वरोज़गार अनुकूलता' if is_hindi else 'Self-Emp'}: {self_suitability})
+                <h3 style="color: #1E3A8A; margin: 0 0 6px 0; font-size: 1.3rem;">{top_1['job_role']}</h3>
+                <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                    🏢 <b>Sector:</b> {top_1['sector']}<br>
+                    🎖️ <b>NSQF Level:</b> Level {top_1.get('nsqf_level', 4)}
+                </div>
+                <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
+                    <span style="font-size: 2.2rem; font-weight: 800; color: #047857;">{top_1['score']}%</span>
+                    <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'योग्यता मेल (Match Score)' if active_lang_code != 'en' else 'Match Score'}</span>
+                </div>
+                <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                    <b>Breakdown:</b> Edu: {top_1['score_breakdown']['education']['score']}/{top_1['score_breakdown']['education']['max_score']} | 
+                    Skill: {top_1['score_breakdown']['skill']['score']}/{top_1['score_breakdown']['skill']['max_score']} | 
+                    Int: {top_1['score_breakdown']['interest']['score']}/{top_1['score_breakdown']['interest']['max_score']} | 
+                    Mob: {top_1['score_breakdown']['mobility']['score']}/{top_1['score_breakdown']['mobility']['max_score']} | 
+                    Pref: {top_1['score_breakdown']['employment_preference']['score']}/{top_1['score_breakdown']['employment_preference']['max_score']} | 
+                    Loc: {top_1['score_breakdown']['local_opportunity']['score']}/{top_1['score_breakdown']['local_opportunity']['max_score']}
+                </div>
+                <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #166534; margin-bottom: 10px;">
+                    💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_1['employment_type']}
+                </div>
+                <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
+                    <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                    {' • '.join(top_1['why_recommended'][:2])}
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # 2-Column Details: (Left: Skill-Gap & Rationale, Right: Local Opportunity & Suitability)
-        col_d1, col_d2 = st.columns([1.2, 1])
-
-        with col_d1:
-            st.markdown(f"#### 🛠️ {'कौशल तुलना (Skill-Gap Analysis):' if is_hindi else 'Skill-Gap Analysis:'}")
-            
-            # Matched Skills (Green)
-            if matched_skills:
-                matched_html = " ".join([f"<span style='background-color:#DCFCE7; color:#166534; font-weight:600; font-size:0.88rem; padding:4px 10px; border-radius:6px; display:inline-block; margin:3px 2px; border:1px solid #86EFAC;'>✅ {s}</span>" for s in matched_skills])
-                st.markdown(f"**{'आपके पास पहले से हुनर (Existing Skills):' if is_hindi else 'Existing Matched Skills:'}**<br>{matched_html}", unsafe_allow_html=True)
-            else:
-                st.markdown(f"*{'प्रारंभिक स्तर (No direct prior skill overlap)' if is_hindi else 'No direct prior skill overlap'}*")
-
-            # Missing Skills (Amber/Orange)
-            st.write("")
-            if missing_skills:
-                missing_html = " ".join([f"<span style='background-color:#FEF3C7; color:#92400E; font-weight:600; font-size:0.88rem; padding:4px 10px; border-radius:6px; display:inline-block; margin:3px 2px; border:1px solid #FCD34D;'>🔄 {s}</span>" for s in missing_skills])
-                st.markdown(f"**{'सीखने योग्य हुनर (Skills to Learn in Training):' if is_hindi else 'Skills to Build During Training:'}**<br>{missing_html}", unsafe_allow_html=True)
-            else:
-                st.success("✅ " + ("आपके पास सभी आवश्यक हुनर पहले से मौजूद हैं!" if is_hindi else "You already possess all required skills for this role!"))
-
-            # Transparent Rationale (Why Recommended)
-            st.write("")
-            st.markdown(f"**💡 {'यह सिफ़ारिश क्यों चुनी गई (Why Recommended):' if is_hindi else 'Why This Role Was Recommended:'}**")
-            for reason in why_list:
-                st.markdown(f"- {reason}")
-
-        with col_d2:
-            # Local Opportunity Box
-            st.markdown(f"#### 📍 {'स्थानीय अवसर व ट्रेनिंग सेंटर:' if is_hindi else 'Local Opportunity & Cluster:'}")
-            if local_opp_details:
-                st.markdown(f"""
-                    <div style="background:#F0FDF4; border:1px solid #86EFAC; border-left: 4px solid #16A34A; border-radius:8px; padding:14px; margin-bottom:12px;">
-                        <h4 style="color:#166534; margin:0 0 6px 0; font-size:1.05rem;">
-                            📍 {local_opp_details.get('district')} ({local_opp_details.get('opportunity_type', 'Training & Placement')})
-                        </h4>
-                        <p style="color:#14532D; font-size:0.92rem; margin:0; line-height:1.5;">
-                            <b>{'मांग स्तर (Demand)' if is_hindi else 'Demand Level'}:</b> {local_opp_details.get('demand_level', 'High')} Demand<br>
-                            <b>{'योजना सहायता' if is_hindi else 'Scheme Grant'}:</b> PM-AJAY GIA Component Eligible<br>
-                            <small style="color:#4B5563;">🏷️ {local_opp_details.get('data_source_type', 'Prototype Demo Data')}</small>
-                        </p>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                    <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px; margin-bottom:12px;">
-                        <p style="color:#64748B; font-size:0.92rem; margin:0;">
-                            ℹ️ {local_opp_info}
-                        </p>
-                    </div>
-                """, unsafe_allow_html=True)
-
-            # Employment / Self-Employment Suitability Card
+    # RANK #2 CARD
+    with col_r2:
+        if top_2:
             st.markdown(f"""
-                <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-left:4px solid #2563EB; border-radius:8px; padding:14px;">
-                    <h4 style="color:#1E40AF; margin:0 0 6px 0; font-size:1.05rem;">
-                        💼 {'रोज़गार / स्वरोज़गार अनुकूलता' if is_hindi else 'Livelihood & Grant Suitability'}
-                    </h4>
-                    <p style="color:#1E293B; font-size:0.92rem; margin:0; line-height:1.5;">
-                        <b>{'श्रेणी' if is_hindi else 'Category'}:</b> {emp_type}<br>
-                        <b>PM-AJAY GIA Fit:</b> {'उच्च (स्वरोज़गार व टूलकिट सहायता के लिए पात्र)' if 'Self' in emp_type else 'उद्योग आधारित रोज़गार (Wage-Employment)'}
-                    </p>
+                <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-top: 6px solid #64748B; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="background: #F1F5F9; color: #475569; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+                        🥈 {'रैंक #2 / Rank #2' if active_lang_code != 'en' else '🥈 Rank #2'}
+                    </div>
+                    <h3 style="color: #1E293B; margin: 0 0 6px 0; font-size: 1.2rem;">{top_2['job_role']}</h3>
+                    <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                        🏢 <b>Sector:</b> {top_2['sector']}<br>
+                        🎖️ <b>NSQF Level:</b> Level {top_2.get('nsqf_level', 4)}
+                    </div>
+                    <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
+                        <span style="font-size: 2.0rem; font-weight: 700; color: #2563EB;">{top_2['score']}%</span>
+                        <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                        <b>Breakdown:</b> Edu: {top_2['score_breakdown']['education']['score']}/{top_2['score_breakdown']['education']['max_score']} | 
+                        Skill: {top_2['score_breakdown']['skill']['score']}/{top_2['score_breakdown']['skill']['max_score']} | 
+                        Int: {top_2['score_breakdown']['interest']['score']}/{top_2['score_breakdown']['interest']['max_score']} | 
+                        Mob: {top_2['score_breakdown']['mobility']['score']}/{top_2['score_breakdown']['mobility']['max_score']} | 
+                        Pref: {top_2['score_breakdown']['employment_preference']['score']}/{top_2['score_breakdown']['employment_preference']['max_score']} | 
+                        Loc: {top_2['score_breakdown']['local_opportunity']['score']}/{top_2['score_breakdown']['local_opportunity']['max_score']}
+                    </div>
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #475569; margin-bottom: 10px;">
+                        💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_2['employment_type']}
+                    </div>
+                    <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
+                        <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                        {' • '.join(top_2['why_recommended'][:2])}
+                    </div>
                 </div>
             """, unsafe_allow_html=True)
 
-        # ---------------------------------------------------------
-        # Suggested Livelihood / Training Pathway ("My Skill Journey")
-        # ---------------------------------------------------------
-        pathway_data = generate_skill_pathway(
-            beneficiary_profile=profile,
-            recommended_job_role=raw_job if raw_job else {"job_role": role_title, "sector": sector_name, "nsqf_level": nsqf_lvl, "required_skills": "|".join(matched_skills + missing_skills)},
-            missing_skills=missing_skills
-        )
-
-        with st.expander(f"🗺️ {'मेरी कौशल यात्रा (My Skill Journey) - ' + role_title + ' के लिए चरणबद्ध मार्ग' if is_hindi else f'My Skill Journey Pathway for {role_title}'}", expanded=(idx == 0)):
-            st.markdown(f"**{'प्रारंभिक स्थिति (Starting Point):' if is_hindi else 'Starting Point:'}** *{pathway_data.get('current_state')}*")
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            pw1, pw2, pw3, pw4 = st.columns(4)
-            
-            with pw1:
-                st.markdown("""
-                    <div style="background:#F1F5F9; border:1px solid #CBD5E1; border-top:4px solid #64748B; border-radius:8px; padding:12px; height:100%;">
-                        <b style="color:#334155; font-size:0.95rem;">🌱 चरण 1: वर्तमान स्थिति</b><br>
-                        <span style="font-size:0.85rem; color:#475569;">मौजूदा अनुभव और बुनियादी शिक्षा का मूल्यांकन।</span>
+    # RANK #3 CARD
+    with col_r3:
+        if top_3:
+            st.markdown(f"""
+                <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-top: 6px solid #94A3B8; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="background: #F1F5F9; color: #475569; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+                        🥉 {'रैंक #3 / Rank #3' if active_lang_code != 'en' else '🥉 Rank #3'}
                     </div>
-                """, unsafe_allow_html=True)
-
-            with pw2:
-                train_info = pathway_data.get("training_stage", {})
-                train_mods = "<br>• ".join(train_info.get("learning_modules", [])[:2])
-                st.markdown(f"""
-                    <div style="background:#FFFBEB; border:1px solid #FDE68A; border-top:4px solid #D97706; border-radius:8px; padding:12px; height:100%;">
-                        <b style="color:#92400E; font-size:0.95rem;">📚 चरण 2: थ्योरी ट्रेनिंग</b><br>
-                        <span style="font-size:0.85rem; color:#78350F;">क्लासरूम प्रशिक्षण:<br>• {train_mods}</span>
+                    <h3 style="color: #1E293B; margin: 0 0 6px 0; font-size: 1.2rem;">{top_3['job_role']}</h3>
+                    <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                        🏢 <b>Sector:</b> {top_3['sector']}<br>
+                        🎖️ <b>NSQF Level:</b> Level {top_3.get('nsqf_level', 4)}
                     </div>
-                """, unsafe_allow_html=True)
-
-            with pw3:
-                prac_info = pathway_data.get("practical_stage", {})
-                prac_tasks = "<br>• ".join(prac_info.get("practical_tasks", [])[:2])
-                st.markdown(f"""
-                    <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-top:4px solid #16A34A; border-radius:8px; padding:12px; height:100%;">
-                        <b style="color:#166534; font-size:0.95rem;">🛠️ चरण 3: प्रैक्टिकल वर्कशॉप</b><br>
-                        <span style="font-size:0.85rem; color:#14532D;">लैब/कार्यशाला अभ्यास:<br>• {prac_tasks}</span>
+                    <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
+                        <span style="font-size: 2.0rem; font-weight: 700; color: #2563EB;">{top_3['score']}%</span>
+                        <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
                     </div>
-                """, unsafe_allow_html=True)
-
-            with pw4:
-                st.markdown(f"""
-                    <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-top:4px solid #2563EB; border-radius:8px; padding:12px; height:100%;">
-                        <b style="color:#1E40AF; font-size:0.95rem;">🏆 चरण 4: NSQF प्रमाणन</b><br>
-                        <span style="font-size:0.85rem; color:#1E3A8A;"><b>{role_title}</b> (Level {nsqf_lvl}) सर्टिफ़िकेशन व PM-AJAY GIA अनुदान से आजीविका।</span>
+                    <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                        <b>Breakdown:</b> Edu: {top_3['score_breakdown']['education']['score']}/{top_3['score_breakdown']['education']['max_score']} | 
+                        Skill: {top_3['score_breakdown']['skill']['score']}/{top_3['score_breakdown']['skill']['max_score']} | 
+                        Int: {top_3['score_breakdown']['interest']['score']}/{top_3['score_breakdown']['interest']['max_score']} | 
+                        Mob: {top_3['score_breakdown']['mobility']['score']}/{top_3['score_breakdown']['mobility']['max_score']} | 
+                        Pref: {top_3['score_breakdown']['employment_preference']['score']}/{top_3['score_breakdown']['employment_preference']['max_score']} | 
+                        Loc: {top_3['score_breakdown']['local_opportunity']['score']}/{top_3['score_breakdown']['local_opportunity']['max_score']}
                     </div>
-                """, unsafe_allow_html=True)
-
-        st.markdown("<hr style='margin: 25px 0;'>", unsafe_allow_html=True)
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #475569; margin-bottom: 10px;">
+                        💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_3['employment_type']}
+                    </div>
+                    <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
+                        <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                        {' • '.join(top_3['why_recommended'][:2])}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------
-    # 5. Action Buttons & Disclaimer
+    # 6. Skill Gap Analysis & Local Cluster Details
     # -------------------------------------------------------------
-    act_col1, act_col2, act_col3 = st.columns([1, 1, 1])
-    with act_col1:
-        if st.button("🔄 " + ("नई बातचीत शुरू करें / Start New Profile" if is_hindi else "Start New Profile"), use_container_width=True, key="btn_recs_new_interview"):
-            st.session_state["beneficiary_step"] = 1
-            st.session_state["active_nav"] = "🎙️ Beneficiary Assistant"
-            st.session_state["sidebar_radio"] = "🎙️ Beneficiary Assistant"
-            st.rerun()
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    st.subheader("🔍 " + ("हुनर मिलान और स्थानीय अवसर (Skill Gap & Local Opportunity)" if active_lang_code != 'en' else "Skill Gap Analysis & Local Cluster Opportunity"))
 
-    with act_col2:
-        if st.button("📊 " + ("प्रशासक डैशबोर्ड देखें / Admin Dashboard" if is_hindi else "View Admin Dashboard"), use_container_width=True, key="btn_recs_goto_dash"):
-            st.session_state["active_nav"] = "📊 Admin Dashboard"
-            st.session_state["sidebar_radio"] = "📊 Admin Dashboard"
-            st.rerun()
+    g1, g2 = st.columns(2)
+    with g1:
+        st.markdown(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px;">
+                <h4 style="color: #1E3A8A; margin-top: 0;">🛠️ {'मौजूदा हुनर बनाम ज़रूरी प्रशिक्षण' if active_lang_code != 'en' else 'Existing Skills vs Training Gap'}</h4>
+                <p style="color: #475569; font-size: 0.95rem;">
+                    <b>{'उपलब्ध हुनर (Matched Skills):' if active_lang_code != 'en' else 'Matched Skills:'}</b><br>
+                    {''.join([f"<span class='skill-tag-matched'>✓ {s}</span>" for s in top_1['matched_skills']]) if top_1['matched_skills'] else "<span style='color:#64748B;'>None explicitly matched (Entry level)</span>"}
+                </p>
+                <p style="color: #475569; font-size: 0.95rem; margin-top: 10px;">
+                    <b>{'सीखने योग्य हुनर (Training Needed):' if active_lang_code != 'en' else 'Skills to Build (Training Gap):'}</b><br>
+                    {''.join([f"<span class='skill-tag-missing'>⚡ {s}</span>" for s in top_1['missing_skills']]) if top_1['missing_skills'] else "<span style='color:#047857;'>✓ 100% skill requirements matched!</span>"}
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
-    with act_col3:
-        st.download_button(
-            label="📥 " + ("कौशल रिपोर्ट डाउनलोड करें (PDF/Text)" if is_hindi else "Download Skill Report"),
-            data=f"KAUSHAL MARG BENEFICIARY REPORT\nBeneficiary: {profile.get('name')}\nDistrict: {profile.get('district')}\nTop Role: {top_recommendations[0].get('job_role')}\nMatch Score: {top_recommendations[0].get('score')}%\nSector: {top_recommendations[0].get('sector')}\nScheme: PM-AJAY (GIA Component)\nTeam: Binary Minds",
-            file_name=f"kaushal_marg_report_{profile.get('name', 'beneficiary').replace(' ', '_')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-            key="btn_download_report"
-        )
+    with g2:
+        st.markdown(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px;">
+                <h4 style="color: #1E3A8A; margin-top: 0;">📍 {'स्थानीय जिला अवसर और PM-AJAY सहायता' if active_lang_code != 'en' else 'Local District Opportunity & PM-AJAY Support'}</h4>
+                <p style="color: #1E293B; font-size: 0.95rem; line-height: 1.5;">
+                    🏢 <b>{'क्लस्टर विवरण / Cluster:' if active_lang_code != 'en' else 'Cluster Info:'}</b><br>
+                    {top_1['local_opportunity']}
+                </p>
+                {'''<div style="background: #FEF3C7; border: 1px solid #FDE68A; border-radius: 6px; padding: 10px; font-size: 0.88rem; color: #92400E; margin-top: 10px;">
+                    📌 <b>Potential PM-AJAY pathway:</b> Final eligibility and assistance depend on applicable government rules and verification.
+                </div>''' if top_1['score_breakdown']['local_opportunity']['score'] > 0 else '''<div style="background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px; font-size: 0.88rem; color: #475569; margin-top: 10px;">
+                    📌 <b>Note:</b> No verified local opportunity data available for this specific role in your district.
+                </div>'''}
+            </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.info("🏷️ **" + ("डेटा डिस्क्लेमर / Prototype Notice:" if is_hindi else "Data Notice:") + "** " + ("सभी 23 जॉब रोल आधिकारिक राष्ट्रीय कौशल योग्यता फ्रेमवर्क (NSQF) के सेक्टर स्किल काउंसिल QP-NOS मानकों पर आधारित हैं। स्थानीय अवसर डेटा प्रोटोटाइप प्रदर्शन के लिए है।" if is_hindi else "All 23 job roles are aligned with official National Skills Qualifications Framework (NSQF) QP-NOS standards. Local vacancy data is simulated for prototype demonstration."))
+    # -------------------------------------------------------------
+    # 7. "My Skill Journey" 4-Stage Pathway Roadmap
+    # -------------------------------------------------------------
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    st.subheader("🗺️ " + ("मेरी कौशल यात्रा (My Skill Journey Pathway)" if active_lang_code != 'en' else "My Skill Journey: 4-Stage Actionable Pathway"))
+
+    pathway = generate_skill_pathway(
+        beneficiary_profile=profile,
+        recommended_job_role=top_1,
+        missing_skills=top_1["missing_skills"]
+    )
+
+    p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+
+    with p_col1:
+        st.markdown(f"""
+            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #3B82F6; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-weight: 700; color: #1E40AF; font-size: 0.95rem;">📍 1. {'वर्तमान स्थिति' if active_lang_code != 'en' else 'Current State'}</div>
+                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+                    {pathway.get('current_state', 'Candidate Profile')}
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with p_col2:
+        st.markdown(f"""
+            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #F59E0B; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-weight: 700; color: #B45309; font-size: 0.95rem;">📚 2. {'तकनीकी प्रशिक्षण' if active_lang_code != 'en' else 'Technical Training'}</div>
+                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+                    {' • '.join(pathway.get('training_stage', {}).get('learning_modules', ['NSQF Core Curriculum']))}
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with p_col3:
+        st.markdown(f"""
+            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #8B5CF6; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-weight: 700; color: #6D28D9; font-size: 0.95rem;">🛠️ 3. {'व्यावहारिक अनुभव' if active_lang_code != 'en' else 'Practical Lab'}</div>
+                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+                    {' • '.join(pathway.get('practical_stage', {}).get('practical_tasks', ['Hands-on Workshop Practice']))}
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with p_col4:
+        st.markdown(f"""
+            <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-top: 4px solid #16A34A; border-radius: 8px; padding: 14px; height: 100%;">
+                <div style="font-weight: 700; color: #166534; font-size: 0.95rem;">🎯 4. {'लक्ष्य रोजगार' if active_lang_code != 'en' else 'Target Livelihood'}</div>
+                <p style="font-size: 0.88rem; color: #14532D; margin: 8px 0 0 0;">
+                    <b>{top_1['job_role']}</b><br>
+                    {top_1['employment_type']} (Potential PM-AJAY Pathway)
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

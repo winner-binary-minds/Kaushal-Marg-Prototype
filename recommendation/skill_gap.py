@@ -37,7 +37,7 @@ def analyze_skill_gap(beneficiary_profile: dict, job_role_data: dict) -> dict:
         b_skills = getattr(beneficiary_profile, "skills", [])
 
     if isinstance(job_role_data, dict):
-        r_skills_raw = job_role_data.get("required_skills", [])
+        r_skills_raw = job_role_data.get("required_skills") or job_role_data.get("job_details", {}).get("required_skills", [])
         role_title = job_role_data.get("job_role", "Target Role")
     else:
         r_skills_raw = getattr(job_role_data, "required_skills", [])

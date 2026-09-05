@@ -63,7 +63,8 @@ from typing import Final, Optional
 from google import genai
 from google.genai import types
 
-from ai.gemini import GeminiClient, GeminiAPIError, GeminiConfigError
+from ai.gemini import GeminiClient, GeminiAPIError, GeminiConfigError, GeminiQuotaError
+from config import GEMINI_TRANSCRIPTION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,7 @@ class AudioTranscriber:
         api_key:          Gemini API key. If ``None``, reads from
                           ``GEMINI_API_KEY`` environment variable.
         model:            Gemini model to use. Defaults to the GeminiClient
-                          default (``gemini-1.5-flash``).
+                          default (``gemini-2.5-flash``).
         max_output_tokens: Token limit for the transcription response.
                           Transcriptions are short; 256 is sufficient.
 
@@ -230,12 +231,12 @@ class AudioTranscriber:
             the client cannot be initialised.
     """
 
-    _DEFAULT_MAX_TOKENS: Final[int] = 256
+    _DEFAULT_MAX_TOKENS: Final[int] = 1024
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = GeminiClient.DEFAULT_MODEL,
+        model: str = GEMINI_TRANSCRIPTION_MODEL,
         max_output_tokens: int = _DEFAULT_MAX_TOKENS,
     ) -> None:
         try:
@@ -311,10 +312,10 @@ class AudioTranscriber:
             )
             return result
 
-        except GeminiAPIError as exc:
-            raise AudioProcessingError(
-                f"Transcription failed: {exc}", cause=exc
-            ) from exc
+        except GeminiQuotaError:
+            raise
+        except GeminiAPIError:
+            raise
         except AudioProcessingError:
             raise
         except Exception as exc:
@@ -400,6 +401,62 @@ class AudioTranscriber:
             language_name=_LANGUAGE_NAMES[language]
         )
 
+    @staticmethod
+    def _extract_text_from_response(response: Any) -> str:
+        """
+        Safely and robustly extracts generated text from a Gemini response object.
+
+        Handles:
+        - Direct response.text attribute (if populated)
+        - Candidates -> content -> parts -> text iteration
+        - Logging of safe metadata (finish_reason, candidate count, etc.) when text is absent
+        """
+        if response is None:
+            logger.debug("Gemini response is None")
+            return ""
+
+        # 1. Try direct .text attribute
+        try:
+            if hasattr(response, "text") and response.text is not None:
+                text_val = str(response.text).strip()
+                if text_val:
+                    return text_val
+        except Exception as err:
+            logger.debug("Accessing response.text raised exception: %s", err)
+
+        # 2. Inspect candidates and content parts
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            logger.debug("Gemini response has 0 candidates")
+            return ""
+
+        extracted_chunks: list[str] = []
+        for i, cand in enumerate(candidates):
+            finish_reason = getattr(cand, "finish_reason", "UNKNOWN")
+            logger.debug("Candidate %d finish_reason: %s", i, finish_reason)
+            content = getattr(cand, "content", None)
+            if content:
+                parts = getattr(content, "parts", None) or []
+                for p in parts:
+                    part_text = getattr(p, "text", None)
+                    if part_text:
+                        extracted_chunks.append(part_text.strip())
+                    
+                    audio_transcription = getattr(p, "audio_transcription", None)
+                    if audio_transcription:
+                        at_text = getattr(audio_transcription, "text", None)
+                        if at_text:
+                            extracted_chunks.append(at_text.strip())
+
+        if extracted_chunks:
+            return " ".join(extracted_chunks).strip()
+
+        logger.debug(
+            "Gemini returned %d candidate(s) but no text parts were present.",
+            len(candidates),
+        )
+        return ""
+
     def _call_gemini(
         self,
         audio_bytes: bytes,
@@ -409,9 +466,8 @@ class AudioTranscriber:
         """
         Call the Gemini multimodal API with the audio bytes.
 
-        Constructs a ``types.Content`` with two parts:
-        1. The audio blob (``inline_data``).
-        2. The transcription instruction (text prompt).
+        Constructs multimodal payload using ``types.Part.from_bytes`` and
+        the language transcription instruction prompt.
 
         Args:
             audio_bytes:    Validated raw audio bytes.
@@ -426,37 +482,60 @@ class AudioTranscriber:
         """
         prompt_text = self._build_prompt(language)
 
-        # Build multimodal content: [audio_part, text_part]
-        audio_part = types.Part(
-            inline_data=types.Blob(
-                mime_type=canonical_mime,
-                data=audio_bytes,
-            )
-        )
-        text_part = types.Part(text=prompt_text)
-
-        content = types.Content(
-            role="user",
-            parts=[audio_part, text_part],
-        )
-
+        import tempfile
+        import os
         try:
-            response = self._gemini._client.models.generate_content(
-                model=self._gemini.model,
-                contents=[content],
-                config=types.GenerateContentConfig(
-                    max_output_tokens=self._gemini.max_output_tokens,
-                ),
-            )
-        except Exception as exc:
-            raise GeminiAPIError(
-                f"Gemini audio transcription API call failed: {exc}"
-            ) from exc
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
 
-        # Gemini may return empty text if audio was silent
-        if response is None or response.text is None:
-            return ""
-        return response.text
+            try:
+                uploaded_file = self._gemini._client.files.upload(
+                    file=tmp_path,
+                    config={'mime_type': canonical_mime}
+                )
+                
+                lang_map = {"en": "en-US", "hi": "hi-IN", "mr": "mr-IN"}
+                audio_config = None
+                if language in lang_map:
+                    audio_config = types.AudioTranscriptionConfig(
+                        language_codes=[lang_map[language]]
+                    )
+                    
+                response = self._gemini._client.models.generate_content(
+                    model=self._gemini.model,
+                    contents=[uploaded_file, prompt_text],
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=self._gemini.max_output_tokens,
+                        audio_transcription_config=audio_config
+                    ),
+                )
+                
+                # Extract and strip text
+                text = self._extract_text_from_response(response).strip()
+                if text:
+                    return text
+                else:
+                    raise AudioProcessingError("Gemini returned an empty transcription response.")
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
+                import re
+                delay_match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str)
+                delay = int(float(delay_match.group(1))) if delay_match else 40
+                raise GeminiQuotaError(f"Gemini API Quota Exceeded. {exc}", retry_delay=delay)
+            elif "401" in err_str or "403" in err_str or "unauthenticated" in err_str:
+                raise GeminiAPIError("API Authentication failed. Please check your GEMINI_API_KEY.")
+            elif "404" in err_str or "not found" in err_str:
+                raise GeminiAPIError(f"Model '{self._gemini.model}' not found. Please check GEMINI_TRANSCRIPTION_MODEL.")
+            elif "503" in err_str or "500" in err_str or "unavailable" in err_str:
+                raise GeminiAPIError("Gemini service is temporarily unavailable. Please try again later.")
+            raise GeminiAPIError(
+                f"Gemini audio transcription API call failed on {self._gemini.model}: {exc}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------

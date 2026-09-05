@@ -38,9 +38,33 @@ class BeneficiaryProfile(BaseModel):
     All fields are optional (can be None/empty) if information was not provided
     in the conversation. The extractor does NOT invent information.
     """
+    name: str | None = Field(
+        default=None,
+        description="Beneficiary name"
+    )
+    age: int | None = Field(
+        default=None,
+        description="Age of the beneficiary"
+    )
+    preferred_language: str | None = Field(
+        default=None,
+        description="Preferred language of communication"
+    )
     education: str | None = Field(
         default=None,
         description="Education level (e.g., '8th Pass', '10th Pass', '12th Pass', 'ITI', 'Diploma')"
+    )
+    current_occupation: str | None = Field(
+        default=None,
+        description="Current occupation or job of the beneficiary"
+    )
+    work_experience: str | None = Field(
+        default=None,
+        description="Work experience details or years of experience"
+    )
+    family_occupation: str | None = Field(
+        default=None,
+        description="Traditional or family occupation"
     )
     skills: list[str] = Field(
         default_factory=list,
@@ -50,9 +74,17 @@ class BeneficiaryProfile(BaseModel):
         default_factory=list,
         description="List of interests/sectors (e.g., 'Agriculture', 'Healthcare'). Empty if none mentioned."
     )
+    aspirations: str | None = Field(
+        default=None,
+        description="Future goals or aspirations of the beneficiary"
+    )
     district: str | None = Field(
         default=None,
         description="District/location mentioned by beneficiary"
+    )
+    local_context: str | None = Field(
+        default=None,
+        description="Broader location or local context"
     )
     employment_preference: str | None = Field(
         default=None,
@@ -61,6 +93,10 @@ class BeneficiaryProfile(BaseModel):
     mobility: str | None = Field(
         default=None,
         description="Mobility preference (e.g., 'Local', 'District Level', 'State Wide')"
+    )
+    constraints: str | None = Field(
+        default=None,
+        description="Any constraints or barriers (e.g., 'Language', 'Physical Disability', 'Family Constraints')"
     )
     
     @field_validator("skills", "interests", mode="before")
@@ -98,12 +134,19 @@ IMPORTANT RULES:
 4. Empty lists (not null) should be used only if the field is "skills" or "interests" and nothing was mentioned
 5. The conversation may be in English, Hindi, or Marathi - extract the underlying information without unnecessary translation
 6. Focus on USER messages (the beneficiary's statements), not assistant responses
-7. For location (district): extract only if explicitly mentioned
-8. For education: extract only if explicitly mentioned
-9. For skills: list each distinct skill mentioned (in the conversation's language or standardized form)
-10. For interests/sectors: list sectors/interests mentioned
-11. For employment preference: extract only if explicitly stated (Self-Employment, Wage-Employment, Any, etc.)
-12. For mobility: extract only if explicitly mentioned (Local, District Level, State Wide, etc.)
+7. For name: extract only if explicitly mentioned
+8. For age: extract only if explicitly mentioned (as integer)
+9. For preferred language: extract only if explicitly mentioned or clear from context
+10. For education: extract only if explicitly mentioned
+11. For current occupation & work experience: extract only if explicitly mentioned
+12. For family/traditional occupation: extract only if explicitly mentioned
+13. For skills: list each distinct skill mentioned (in the conversation's language or standardized form)
+14. For interests/sectors: list sectors/interests mentioned
+15. For aspirations/goals: extract only if explicitly mentioned
+16. For location (district) and broader local context: extract only if explicitly mentioned
+17. For employment preference: extract only if explicitly stated (Self-Employment, Wage-Employment, Any, etc.)
+18. For mobility preference: extract only if explicitly mentioned (Local, District Level, State Wide, etc.)
+19. For constraints/barriers: extract only if explicitly mentioned (physical, work-related, etc.)
 
 CONVERSATION HISTORY:
 {conversation_text}
@@ -136,12 +179,17 @@ Extract the beneficiary's profile. Return ONLY valid JSON matching the schema. D
         
         Returns:
             Dictionary representation of BeneficiaryProfile with keys:
+            - name (str | None)
             - education (str | None)
+            - current_occupation (str | None)
+            - work_experience (str | None)
             - skills (list[str])
             - interests (list[str])
+            - aspirations (str | None)
             - district (str | None)
             - employment_preference (str | None)
             - mobility (str | None)
+            - constraints (str | None)
         
         Raises:
             ValueError: If messages parameter is invalid (not a list, contains non-Message items)

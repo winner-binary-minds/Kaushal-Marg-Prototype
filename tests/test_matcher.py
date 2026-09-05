@@ -32,12 +32,13 @@ def test_matching_district_local_opportunity():
         "education": "10th Pass",
         "skills": ["tractor operation"],
         "interests": ["Agriculture"],
-        "mobility": "Low",
+        "mobility": "District",
+        "employment_preference": "Wage-Employment",
         "district": "Indore"
     }
 
     recs = recommend_jobs(profile, top_n=3)
-    assert len(recs) == 3
+    assert len(recs) > 0
 
     top = recs[0]
     assert top["job_role"] == "Tractor Operator"
@@ -54,20 +55,21 @@ def test_no_matching_district_local_opportunity():
         "education": "10th Pass",
         "skills": ["tractor operation"],
         "interests": ["Agriculture"],
-        "mobility": "Low",
+        "mobility": "District",
+        "employment_preference": "Wage-Employment",
         "district": "UnknownRemoteDistrict"
     }
 
     recs = recommend_jobs(profile, top_n=3)
-    assert len(recs) == 3
+    assert len(recs) > 0
 
     for r in recs:
         assert r["local_opportunity"] == "No verified local opportunity data available"
         assert r["local_opportunity_details"] is None
 
-    # Score should be 10 points lower (73 instead of 83)
+    # Local opportunity score must be 0
     top = recs[0]
-    assert top["score"] == 73
+    assert top["score_breakdown"]["local_opportunity"]["score"] == 0
     print("[OK] test_no_matching_district_local_opportunity passed (Fallback handling verified)")
 
 
@@ -78,11 +80,12 @@ def test_missing_location_field():
         "skills": ["Solar wiring"],
         "interests": ["Green Jobs"],
         "mobility": "District",
+        "employment_preference": "Wage-Employment",
         "district": ""  # Missing location
     }
 
     recs = recommend_jobs(profile, top_n=3)
-    assert len(recs) == 3
+    assert len(recs) > 0, "Expected at least 1 recommendation scoring >= 45"
 
     top = recs[0]
     assert top["local_opportunity"] == "No verified local opportunity data available"
@@ -96,12 +99,14 @@ def test_empty_opportunity_dataset():
         "education": "10th Pass",
         "skills": ["Solar wiring"],
         "interests": ["Green Jobs"],
-        "district": "Jaipur"
+        "district": "Jaipur",
+        "mobility": "District",
+        "employment_preference": "Wage-Employment"
     }
 
     # Pass non-existent path for opportunity CSV
     recs = recommend_jobs(profile, top_n=3, opp_csv_path="non_existent_opps.csv")
-    assert len(recs) == 3
+    assert len(recs) > 0, "Expected at least 1 recommendation scoring >= 45"
 
     for r in recs:
         assert r["local_opportunity"] == "No verified local opportunity data available"

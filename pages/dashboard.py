@@ -9,36 +9,86 @@ Team: Binary Minds | SIH Problem Statement 26097
 import streamlit as st
 import pandas as pd
 from typing import Dict, Any
+import html
 
-from database.database import get_filtered_dashboard_data, seed_synthetic_beneficiaries_if_empty
+from database.database import get_filtered_dashboard_data, seed_demo_database
 
 
 def render_dashboard_page():
     """Renders the comprehensive PM-AJAY GIA Skilling & Livelihood Analytics Dashboard."""
-    
-    # Ensure database has seed demonstration records
-    seed_synthetic_beneficiaries_if_empty()
+    import os
+    import hmac
     
     # -------------------------------------------------------------
-    # 1. Header & Context
+    # 0. Admin Authentication
     # -------------------------------------------------------------
-    st.markdown("""
+    expected_password = os.getenv("ADMIN_PASSWORD")
+    
+    if not expected_password:
+        st.error("Admin dashboard cannot be loaded: ADMIN_PASSWORD environment variable is missing.")
+        st.info("Please configure the ADMIN_PASSWORD environment variable in your .env file.")
+        return
+    
+    if not st.session_state.get("admin_authenticated", False):
+        st.markdown("<h2 style='text-align: center; color: #1E3A8A;'>Admin Login Required</h2>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1,2,1])
+        with col2:
+            st.info("Please enter the admin password to view the dashboard.")
+            pwd = st.text_input("Password", type="password", key="admin_pwd_input")
+            if st.button("Login", use_container_width=True):
+                if hmac.compare_digest(pwd.encode('utf-8'), expected_password.encode('utf-8')):
+                    st.session_state["admin_authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+        return
+    
+    # -------------------------------------------------------------
+    # 1. Header & Context & Demo Mode
+    # -------------------------------------------------------------
+    is_demo_mode = st.session_state.get("dashboard_demo_mode", False)
+    
+    # Toggle UI
+    col_t1, col_t2 = st.columns([3, 1])
+    with col_t2:
+        if is_demo_mode:
+            if st.button("⬅️ Return to Real Data", use_container_width=True):
+                st.session_state["dashboard_demo_mode"] = False
+                st.rerun()
+        else:
+            if st.button("🔧 Enter Demo Analytics Mode", use_container_width=True):
+                seed_demo_database("demo_kaushal_marg.db")
+                st.session_state["dashboard_demo_mode"] = True
+                st.rerun()
+
+    header_title = "📊 PM-AJAY GIA: Livelihood & Skilling Dashboard"
+    if is_demo_mode:
+        header_title = "📊 [DEMO MODE] Livelihood & Skilling Dashboard"
+        st.warning("⚠️ **DEMO DATA — Synthetic records for SIH demonstration.** You are currently viewing isolated, synthetic demo data.")
+    else:
+        st.info("✅ **REAL DATA.** You are currently viewing actual beneficiary records from the Current Prototype Database.")
+        
+    st.markdown(f"""
         <div style="border-bottom: 2px solid #E2E8F0; padding-bottom: 12px; margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                 <div>
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0 0 4px 0;">
-                        📊 PM-AJAY GIA: Livelihood & Skilling Dashboard
+                        {header_title}
                     </h1>
                     <p style="color: #4B5563; font-size: 1.05rem; margin: 0;">
                         Aggregated analytics on SC community skilling demand, NSQF alignments, and livelihood mapping under PM-AJAY (GIA Component).
                     </p>
                 </div>
+                <div>
+                    <!-- Logout button on the right -->
+                </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
-
-    # Prototype Data Notice
-    st.info("🏷️ **Prototype Notice:** Analytics are aggregated directly from SQLite database (`kaushal_marg.db`) using synthetic PM-AJAY GIA beneficiary cohorts for SIH 26097 evaluation.")
+    
+    if st.button("🚪 Logout", key="btn_admin_logout"):
+        st.session_state["admin_authenticated"] = False
+        st.rerun()
 
     # -------------------------------------------------------------
     # 2. Interactive Multi-Filter Bar
@@ -49,7 +99,7 @@ def render_dashboard_page():
     with f_col1:
         lang_filter = st.selectbox(
             "🗣️ Language / भाषा:",
-            options=["All Languages", "Hindi (हिंदी)", "English"],
+            options=["All Languages", "Hindi (हिंदी)", "Marathi (मराठी)", "English"],
             index=0,
             key="dash_filter_lang"
         )
@@ -92,7 +142,8 @@ def render_dashboard_page():
     data = get_filtered_dashboard_data(
         selected_language=lang_filter,
         selected_district=dist_filter,
-        selected_sector=sector_filter
+        selected_sector=sector_filter,
+        db_path="demo_kaushal_marg.db" if is_demo_mode else None
     )
 
     total_beneficiaries = data.get("total_beneficiaries", 0)
@@ -108,7 +159,7 @@ def render_dashboard_page():
     records = data.get("records", [])
 
     # Calculate Self-Employment Share
-    self_emp_count = pref_dist.get("Self-Employment (GIA Grant)", 0)
+    self_emp_count = pref_dist.get("Self-Employment", 0)
     total_pref = sum(pref_dist.values()) if pref_dist else 1
     self_emp_pct = round((self_emp_count / total_pref) * 100, 1) if total_pref > 0 else 0.0
 
@@ -132,7 +183,7 @@ def render_dashboard_page():
         st.metric(
             label="💼 Self-Employment Aspirants",
             value=f"{self_emp_pct}%",
-            delta="GIA Grant Target"
+            delta="PM-AJAY Target"
         )
     with kpi4:
         active_dists = len(dist_dist)
@@ -205,9 +256,10 @@ def render_dashboard_page():
         if lang_dist:
             for l_name, l_count in lang_dist.items():
                 pct = round((l_count / total_beneficiaries) * 100, 1)
+                safe_name = html.escape(str(l_name))
                 st.markdown(f"""
                     <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{l_name}</b>: {l_count} ({pct}%)
+                        <b>{safe_name}</b>: {l_count} ({pct}%)
                     </div>
                 """, unsafe_allow_html=True)
         else:
@@ -217,9 +269,10 @@ def render_dashboard_page():
         st.markdown("##### 💡 Most Common Interests")
         if common_interests:
             for int_name, int_count in common_interests.items():
+                safe_int = html.escape(str(int_name))
                 st.markdown(f"""
                     <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{int_name}</b>: {int_count} candidates
+                        <b>{safe_int}</b>: {int_count} candidates
                     </div>
                 """, unsafe_allow_html=True)
         else:
@@ -229,9 +282,10 @@ def render_dashboard_page():
         st.markdown("##### 🛠️ Top Missing Skills (Skill Gaps)")
         if missing_skills:
             for sk_name, sk_count in missing_skills.items():
+                safe_sk = html.escape(str(sk_name))
                 st.markdown(f"""
                     <div style="background:#FEF3C7; border:1px solid #FDE68A; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{sk_name}</b>: {sk_count} need training
+                        <b>{safe_sk}</b>: {sk_count} need training
                     </div>
                 """, unsafe_allow_html=True)
         else:
@@ -246,10 +300,11 @@ def render_dashboard_page():
     if top_roles_dist:
         role_cols = st.columns(min(len(top_roles_dist), 4))
         for i, (r_name, r_cnt) in enumerate(list(top_roles_dist.items())[:4]):
+            safe_role = html.escape(str(r_name))
             with role_cols[i]:
                 st.markdown(f"""
                     <div style="background:#FFFFFF; border:1px solid #CBD5E1; border-top:4px solid #2563EB; border-radius:8px; padding:14px; text-align:center;">
-                        <b style="color:#1E3A8A; font-size:1.05rem;">{r_name}</b><br>
+                        <b style="color:#1E3A8A; font-size:1.05rem;">{safe_role}</b><br>
                         <span style="font-size:1.3rem; font-weight:700; color:#047857;">{r_cnt}</span>
                         <div style="font-size:0.85rem; color:#64748B;">Beneficiaries Matched</div>
                     </div>
@@ -282,9 +337,9 @@ def render_dashboard_page():
         # Export CSV Button
         csv_bytes = df_records.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Export Filtered Beneficiary Data (CSV)",
+            label="📥 Export Filtered Beneficiary Data (Prototype Records CSV)",
             data=csv_bytes,
-            file_name=f"pm_ajay_beneficiary_data_{dist_filter.lower()}_{sector_filter.lower()}.csv",
+            file_name=f"pm_ajay_prototype_records_{dist_filter.lower()}_{sector_filter.lower()}.csv",
             mime="text/csv",
             key="btn_export_csv"
         )

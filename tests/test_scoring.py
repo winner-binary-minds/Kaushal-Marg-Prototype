@@ -37,24 +37,24 @@ def test_education_score_calculation():
 
 def test_skill_score_calculation():
     """Verify skill score calculation out of max 25 points."""
-    res_full = calculate_skill_score(["Solar wiring", "Safety protocols"], "Solar wiring|Safety protocols")
+    res_full = calculate_skill_score(["Solar wiring", "Safety protocols"], "", "", "Solar wiring|Safety protocols", "", "")
     assert res_full["score"] == 25
 
-    res_half = calculate_skill_score(["Solar wiring"], "Solar wiring|PV module installation")
+    res_half = calculate_skill_score(["Solar wiring"], "", "", "Solar wiring|PV module installation", "", "")
     assert res_half["score"] in [12, 13]  # (1/2)*25 = 12.5 -> 12 or 13 depending on rounding
     print("[OK] test_skill_score_calculation passed")
 
 
 def test_interest_score_calculation():
     """Verify interest score calculation out of max 20 points."""
-    res_match = calculate_interest_score(["Green Jobs"], "Green Jobs")
+    res_match = calculate_interest_score(["Green Jobs"], "", "", "Green Jobs")
     assert res_match["score"] == 20
 
-    res_no_match = calculate_interest_score(["Apparel"], "Green Jobs")
+    res_no_match = calculate_interest_score(["Apparel"], "", "", "Green Jobs")
     assert res_no_match["score"] == 0
 
-    res_empty = calculate_interest_score([], "Green Jobs")
-    assert res_empty["score"] == 10  # Fallback
+    res_empty = calculate_interest_score([], "", "", "Green Jobs")
+    assert res_empty["score"] == 0  # Changed to 0 since unknown should not award points
     print("[OK] test_interest_score_calculation passed")
 
 
@@ -77,13 +77,13 @@ def test_employment_preference_score_calculation():
     assert res_wage["score"] == 6
 
     res_any = calculate_employment_preference_score("Any", self_emp_suitability="High", wage_emp_suitability="Low")
-    assert res_any["score"] == 10
+    assert res_any["score"] == 0 # Changed to 0 because "any" preference is now penalized for lack of explicit match
     print("[OK] test_employment_preference_score_calculation passed")
 
 
 def test_local_opportunity_score_calculation():
     """Verify local opportunity score calculation out of max 10 points."""
-    res_valid = calculate_local_opportunity_score(has_local_opportunity=True, district_match=True)
+    res_valid = calculate_local_opportunity_score(has_local_opportunity=True, district_match=True, is_exact=True)
     assert res_valid["score"] == 10
 
     res_invalid = calculate_local_opportunity_score(has_local_opportunity=False)
@@ -111,7 +111,7 @@ def test_calculate_total_score_sum_to_100():
         "wage_employment_suitability": "High"
     }
 
-    res = calculate_total_score(profile, job, has_local_opportunity=True)
+    res = calculate_total_score(profile, job, has_local_opportunity=True, is_exact_opportunity=True)
     assert res["max_total_score"] == 100
     assert res["total_score"] == 100  # Perfect match scenario
     print("[OK] test_calculate_total_score_sum_to_100 passed (Max 100 score verified)")

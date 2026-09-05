@@ -21,7 +21,7 @@ SYNTHETIC_BENEFICIARY_PROFILES: List[Dict[str, Any]] = [
         "mobility": "Low (Local Rural)",
         "employment_preference": "Self-Employment",
         "district": "Indore",
-        "notes": "Experienced in farm machinery, seeking PM-AJAY GIA grant for custom hiring center."
+        "notes": "Experienced in farm machinery, seeking PM-AJAY GIA assistance for custom hiring center."
     },
     {
         "id": "DEMO-ELEC-02",
@@ -105,7 +105,7 @@ SYNTHETIC_BENEFICIARY_PROFILES: List[Dict[str, Any]] = [
         "mobility": "Low (Local Rural Only)",
         "employment_preference": "Self-Employment",
         "district": "Patna",
-        "notes": "Traditional artisan seeking direct market linkage and artisan tool grant."
+        "notes": "Traditional artisan seeking direct market linkage and artisan tool assistance."
     },
     {
         "id": "DEMO-WAGE-09",

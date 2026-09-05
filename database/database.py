@@ -31,74 +31,50 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 def init_db(db_path: Optional[str] = None) -> None:
     """
-    Initializes the database schema for beneficiaries, profiles, conversations, and recommendations.
+    Initializes the database schema from schema.sql and handles migrations.
     """
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
 
-    # 1. Beneficiaries Table (No sensitive PII)
+    # 1. Create a lightweight schema_versions table to track migrations
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS beneficiaries (
-            beneficiary_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            preferred_language TEXT DEFAULT 'hi',
-            district TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS schema_versions (
+            version INTEGER PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
-    # 2. Profiles Table (Skilling, education & livelihood parameters)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
-            profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            beneficiary_id TEXT NOT NULL,
-            education TEXT,
-            skills_json TEXT DEFAULT '[]',
-            interests_json TEXT DEFAULT '[]',
-            district TEXT,
-            mobility TEXT DEFAULT 'Low',
-            employment_preference TEXT DEFAULT 'Self-Employment',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (beneficiary_id) REFERENCES beneficiaries (beneficiary_id) ON DELETE CASCADE
-        );
-    """)
+    # 2. Read and execute the canonical schema
+    schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema_sql = f.read()
 
-    # 3. Conversations Table (Interview turns & voice transcriptions)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
-            conversation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            beneficiary_id TEXT NOT NULL,
-            sender TEXT NOT NULL CHECK (sender IN ('user', 'assistant')),
-            message_text TEXT NOT NULL,
-            input_mode TEXT DEFAULT 'voice' CHECK (input_mode IN ('voice', 'text')),
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (beneficiary_id) REFERENCES beneficiaries (beneficiary_id) ON DELETE CASCADE
-        );
-    """)
+    cursor.executescript(schema_sql)
 
-    # 4. Recommendations Table (NSQF-aligned recommendation results)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS recommendations (
-            recommendation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            beneficiary_id TEXT NOT NULL,
-            rank_position INTEGER DEFAULT 1,
-            job_role TEXT NOT NULL,
-            sector TEXT NOT NULL,
-            nsqf_level INTEGER NOT NULL,
-            match_score REAL NOT NULL,
-            skill_gap_json TEXT DEFAULT '{}',
-            local_opportunity TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (beneficiary_id) REFERENCES beneficiaries (beneficiary_id) ON DELETE CASCADE
-        );
-    """)
+    # 3. Lightweight schema migration for existing databases
+    cursor.execute("SELECT MAX(version) FROM schema_versions")
+    row = cursor.fetchone()
+    current_version = row[0] if row[0] is not None else 0
 
-    # Create indexes
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_profiles_beneficiary ON profiles(beneficiary_id);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversations_beneficiary ON conversations(beneficiary_id);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_beneficiary ON recommendations(beneficiary_id);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_beneficiaries_district ON beneficiaries(district);")
+    if current_version < 1:
+        # Version 1: Add new profile fields if they don't exist
+        try:
+            cursor.execute("SELECT age FROM profiles LIMIT 1")
+        except sqlite3.OperationalError:
+            print("Migrating profiles schema to include new fields...")
+            try:
+                # Execute each alter table within the transaction
+                cursor.execute("ALTER TABLE profiles ADD COLUMN age INTEGER;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN current_occupation TEXT;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN work_experience TEXT;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN family_occupation TEXT;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN aspirations TEXT;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN local_context TEXT;")
+                cursor.execute("ALTER TABLE profiles ADD COLUMN constraints TEXT;")
+            except sqlite3.OperationalError as e:
+                print(f"Migration error (could be partial): {e}")
+        
+        cursor.execute("INSERT INTO schema_versions (version) VALUES (1)")
 
     conn.commit()
     conn.close()
@@ -133,6 +109,99 @@ def generate_beneficiary_id(district: Optional[str] = None) -> str:
     return f"{prefix}-{dist_code}-{random_suffix}"
 
 
+def save_assessment_transaction(
+    beneficiary_id: str,
+    profile_data: Dict[str, Any],
+    recommendations_list: List[Dict[str, Any]],
+    db_path: Optional[str] = None
+) -> None:
+    """
+    Saves a profile and its recommendations in a single atomic transaction.
+    """
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        
+        # 1. Prepare profile data
+        skills_list = profile_data.get("skills", [])
+        if not isinstance(skills_list, list): skills_list = []
+        interests_list = profile_data.get("interests", [])
+        if not isinstance(interests_list, list): interests_list = []
+        
+        age = profile_data.get("age")
+        if age is not None:
+            try: age = int(age)
+            except (ValueError, TypeError): age = None
+
+        district = profile_data.get("district")
+        if district:
+            district = str(district).strip()
+            
+        cursor.execute(
+            """
+            INSERT INTO profiles (
+                beneficiary_id, age, education, current_occupation, work_experience, family_occupation,
+                skills_json, interests_json, aspirations, district, local_context, mobility, 
+                employment_preference, constraints, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+            """,
+            (
+                beneficiary_id,
+                age,
+                str(profile_data.get("education", "")).strip() if profile_data.get("education") else None,
+                str(profile_data.get("current_occupation", "")).strip() if profile_data.get("current_occupation") else None,
+                str(profile_data.get("work_experience", "")).strip() if profile_data.get("work_experience") else None,
+                str(profile_data.get("family_occupation", "")).strip() if profile_data.get("family_occupation") else None,
+                json.dumps(skills_list, ensure_ascii=False),
+                json.dumps(interests_list, ensure_ascii=False),
+                str(profile_data.get("aspirations", "")).strip() if profile_data.get("aspirations") else None,
+                district,
+                str(profile_data.get("local_context", "")).strip() if profile_data.get("local_context") else None,
+                str(profile_data.get("mobility")).strip() if profile_data.get("mobility") else None,
+                str(profile_data.get("employment_preference")).strip() if profile_data.get("employment_preference") else None,
+                str(profile_data.get("constraints", "")).strip() if profile_data.get("constraints") else None
+            )
+        )
+        
+        if district:
+            cursor.execute(
+                "UPDATE beneficiaries SET district = ?, updated_at = CURRENT_TIMESTAMP WHERE beneficiary_id = ?;",
+                (district, beneficiary_id)
+            )
+
+        # 2. Insert Recommendations
+        for idx, rec in enumerate(recommendations_list, start=1):
+            job_role = str(rec.get("job_role", "Unknown Role")).strip()
+            sector = str(rec.get("sector", "General")).strip()
+            
+            try: nsqf_level = int(rec.get("nsqf_level", 4))
+            except (ValueError, TypeError): nsqf_level = 4
+            
+            try: match_score = float(rec.get("score", rec.get("total_score", rec.get("match_score", 0.0))))
+            except (ValueError, TypeError): match_score = 0.0
+            
+            skill_gap = rec.get("skill_gap", {})
+            if not isinstance(skill_gap, dict): skill_gap = {}
+            skill_gap_json = json.dumps(skill_gap, ensure_ascii=False)
+            
+            local_opp = str(rec.get("local_opportunity", "")).strip() if rec.get("local_opportunity") else None
+
+            cursor.execute(
+                """
+                INSERT INTO recommendations (
+                    beneficiary_id, rank_position, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opportunity, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+                """,
+                (beneficiary_id, idx, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opp)
+            )
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
 def create_beneficiary(
     name: str,
     preferred_language: str = "hi",
@@ -148,29 +217,38 @@ def create_beneficiary(
         beneficiary_id = generate_beneficiary_id(district)
 
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        """
-        INSERT INTO beneficiaries (beneficiary_id, name, preferred_language, district, created_at, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-        """,
-        (beneficiary_id, name.strip(), preferred_language, district.strip() if district else None)
-    )
-    
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """
+            INSERT INTO beneficiaries (beneficiary_id, name, preferred_language, district, created_at, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            """,
+            (beneficiary_id, name.strip(), preferred_language, district.strip() if district else None)
+        )
+        
+        conn.commit()
+    finally:
+        conn.close()
     return beneficiary_id
 
 
 def save_profile(
     beneficiary_id: str,
+    age: Optional[int] = None,
     education: Optional[str] = None,
+    current_occupation: Optional[str] = None,
+    work_experience: Optional[str] = None,
+    family_occupation: Optional[str] = None,
     skills: Optional[List[str]] = None,
     interests: Optional[List[str]] = None,
+    aspirations: Optional[str] = None,
     district: Optional[str] = None,
-    mobility: str = "Low",
-    employment_preference: str = "Self-Employment",
+    local_context: Optional[str] = None,
+    mobility: Optional[str] = None,
+    employment_preference: Optional[str] = None,
+    constraints: Optional[str] = None,
     db_path: Optional[str] = None
 ) -> int:
     """
@@ -184,27 +262,35 @@ def save_profile(
     interests_json = json.dumps(interests_list, ensure_ascii=False)
 
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO profiles (
-            beneficiary_id, education, skills_json, interests_json, district, mobility, employment_preference, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
-        """,
-        (beneficiary_id, education, skills_json, interests_json, district, mobility, employment_preference)
-    )
-    profile_id = cursor.lastrowid
-
-    # Also update district in beneficiaries table if supplied
-    if district:
         cursor.execute(
-            "UPDATE beneficiaries SET district = ?, updated_at = CURRENT_TIMESTAMP WHERE beneficiary_id = ?;",
-            (district, beneficiary_id)
+            """
+            INSERT INTO profiles (
+                beneficiary_id, age, education, current_occupation, work_experience, family_occupation,
+                skills_json, interests_json, aspirations, district, local_context, mobility, 
+                employment_preference, constraints, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+            """,
+            (
+                beneficiary_id, age, education, current_occupation, work_experience, family_occupation,
+                skills_json, interests_json, aspirations, district, local_context,
+                mobility, employment_preference, constraints
+            )
         )
+        profile_id = cursor.lastrowid
 
-    conn.commit()
-    conn.close()
+        # Also update district in beneficiaries table if supplied
+        if district:
+            cursor.execute(
+                "UPDATE beneficiaries SET district = ?, updated_at = CURRENT_TIMESTAMP WHERE beneficiary_id = ?;",
+                (district, beneficiary_id)
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
     return profile_id
 
 
@@ -213,21 +299,23 @@ def get_profile(beneficiary_id: str, db_path: Optional[str] = None) -> Optional[
     Retrieves the latest skilling profile for a beneficiary.
     """
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        SELECT p.*, b.name, b.preferred_language 
-        FROM profiles p
-        JOIN beneficiaries b ON p.beneficiary_id = b.beneficiary_id
-        WHERE p.beneficiary_id = ?
-        ORDER BY p.profile_id DESC
-        LIMIT 1;
-        """,
-        (beneficiary_id,)
-    )
-    row = cursor.fetchone()
-    conn.close()
+        cursor.execute(
+            """
+            SELECT p.*, b.name, b.preferred_language 
+            FROM profiles p
+            JOIN beneficiaries b ON p.beneficiary_id = b.beneficiary_id
+            WHERE p.beneficiary_id = ?
+            ORDER BY p.profile_id DESC
+            LIMIT 1;
+            """,
+            (beneficiary_id,)
+        )
+        row = cursor.fetchone()
+    finally:
+        conn.close()
 
     if not row:
         return None
@@ -247,12 +335,19 @@ def get_profile(beneficiary_id: str, db_path: Optional[str] = None) -> Optional[
         "beneficiary_id": row["beneficiary_id"],
         "name": row["name"],
         "preferred_language": row["preferred_language"],
+        "age": row["age"],
         "education": row["education"],
+        "current_occupation": row["current_occupation"],
+        "work_experience": row["work_experience"],
+        "family_occupation": row["family_occupation"],
         "skills": skills,
         "interests": interests,
+        "aspirations": row["aspirations"],
         "district": row["district"],
+        "local_context": row["local_context"],
         "mobility": row["mobility"],
         "employment_preference": row["employment_preference"],
+        "constraints": row["constraints"],
         "created_at": row["created_at"]
     }
 
@@ -274,18 +369,20 @@ def save_conversation(
         input_mode = "voice"
 
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO conversations (beneficiary_id, sender, message_text, input_mode, timestamp)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP);
-        """,
-        (beneficiary_id, sender, message_text.strip(), input_mode)
-    )
-    conv_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+        cursor.execute(
+            """
+            INSERT INTO conversations (beneficiary_id, sender, message_text, input_mode, timestamp)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP);
+            """,
+            (beneficiary_id, sender, message_text.strip(), input_mode)
+        )
+        conv_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
     return conv_id
 
 
@@ -294,19 +391,21 @@ def get_conversation_history(beneficiary_id: str, db_path: Optional[str] = None)
     Retrieves full conversation history for a beneficiary in chronological order.
     """
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        SELECT conversation_id, beneficiary_id, sender, message_text, input_mode, timestamp
-        FROM conversations
-        WHERE beneficiary_id = ?
-        ORDER BY conversation_id ASC;
-        """,
-        (beneficiary_id,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
+        cursor.execute(
+            """
+            SELECT conversation_id, beneficiary_id, sender, message_text, input_mode, timestamp
+            FROM conversations
+            WHERE beneficiary_id = ?
+            ORDER BY conversation_id ASC;
+            """,
+            (beneficiary_id,)
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     return [
         {
@@ -338,19 +437,21 @@ def save_recommendation(
     skill_gap_json = json.dumps(skill_gap if skill_gap else {}, ensure_ascii=False)
 
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO recommendations (
-            beneficiary_id, rank_position, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opportunity, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
-        """,
-        (beneficiary_id, rank_position, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opportunity)
-    )
-    rec_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+        cursor.execute(
+            """
+            INSERT INTO recommendations (
+                beneficiary_id, rank_position, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opportunity, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+            """,
+            (beneficiary_id, rank_position, job_role, sector, nsqf_level, match_score, skill_gap_json, local_opportunity)
+        )
+        rec_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
     return rec_id
 
 
@@ -427,21 +528,22 @@ def get_recommendations(beneficiary_id: str, db_path: Optional[str] = None) -> L
     return results
 
 
-def seed_synthetic_beneficiaries_if_empty(db_path: Optional[str] = None) -> int:
+def seed_demo_database(db_path: str = "demo_kaushal_marg.db") -> int:
     """
-    Seeds the SQLite database with realistic synthetic beneficiary records under PM-AJAY GIA
-    if the database currently has fewer than 5 records.
+    Seeds a separate demo SQLite database with realistic synthetic beneficiary records
+    for demonstration. Never touches the real production database.
     """
+    init_db(db_path)
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM beneficiaries;")
     count = cursor.fetchone()[0]
     conn.close()
 
-    if count >= 5:
+    if count >= 24: # We insert 24 records below
         return count
 
-    # 25 Realistic Synthetic SC Beneficiary Profiles for Prototype Demonstration
+    # 24 Realistic Synthetic SC Beneficiary Profiles for Prototype Demonstration
     sample_cohort = [
         {"name": "Ramesh Kumar", "lang": "hi", "dist": "Indore", "edu": "10th Pass", "skills": ["Tractor operation", "Basic farming"], "interests": ["Agriculture", "Machinery"], "pref": "Self-Employment", "role": "Tractor Operator", "sec": "Agriculture", "nsqf": 4, "score": 83.0, "gap": {"matched_skills": ["Tractor driving"], "missing_skills": ["Implement hitching", "Routine maintenance"]}},
         {"name": "Sunita Devi", "lang": "hi", "dist": "Jaipur", "edu": "12th Pass", "skills": ["Basic electrical wiring", "Tool handling"], "interests": ["Green Jobs", "Solar Energy"], "pref": "Wage-Employment", "role": "Solar PV Installer (Suryamitra)", "sec": "Green Jobs", "nsqf": 4, "score": 78.0, "gap": {"matched_skills": ["Electrical wiring"], "missing_skills": ["PV module installation", "Inverter setup"]}},
@@ -493,7 +595,7 @@ def seed_synthetic_beneficiaries_if_empty(db_path: Optional[str] = None) -> int:
             match_score=item["score"],
             rank_position=1,
             skill_gap=item["gap"],
-            local_opportunity=f"Active cluster in {item['dist']} (PM-AJAY GIA Grant Eligible)",
+            local_opportunity=f"Active cluster in {item['dist']} (Potential PM-AJAY Pathway)",
             db_path=db_path
         )
 
@@ -517,7 +619,12 @@ def get_filtered_dashboard_data(
     params = []
 
     if selected_language and selected_language not in ("All Languages", "All", ""):
-        code = "hi" if "हिंदी" in selected_language or "hi" in selected_language.lower() else "en"
+        if "हिंदी" in selected_language or "hi" in selected_language.lower():
+            code = "hi"
+        elif "मराठी" in selected_language or "marathi" in selected_language.lower() or "mr" in selected_language.lower():
+            code = "mr"
+        else:
+            code = "en"
         where_clauses.append("b.preferred_language = ?")
         params.append(code)
 
@@ -546,7 +653,11 @@ def get_filtered_dashboard_data(
     # 2. Language Distribution
     query_lang = f"""
         SELECT 
-            CASE WHEN b.preferred_language = 'hi' THEN 'Hindi (हिंदी)' ELSE 'English' END as lang_label,
+            CASE 
+                WHEN b.preferred_language = 'hi' THEN 'Hindi (हिंदी)' 
+                WHEN b.preferred_language = 'mr' THEN 'Marathi (मराठी)' 
+                ELSE 'English' 
+            END as lang_label,
             COUNT(DISTINCT b.beneficiary_id) as count
         FROM beneficiaries b
         LEFT JOIN profiles p ON b.beneficiary_id = p.beneficiary_id
@@ -623,8 +734,10 @@ def get_filtered_dashboard_data(
     query_pref = f"""
         SELECT 
             CASE 
-                WHEN p.employment_preference LIKE '%Self%' THEN 'Self-Employment (GIA Grant)'
-                ELSE 'Wage-Employment (Salaried Job)'
+                WHEN p.employment_preference LIKE '%Self%' THEN 'Self-Employment'
+                WHEN p.employment_preference LIKE '%Wage%' OR p.employment_preference LIKE '%Job%' OR p.employment_preference LIKE '%Salaried%' THEN 'Wage-Employment'
+                WHEN p.employment_preference LIKE '%Any%' THEN 'Any'
+                ELSE 'Unknown'
             END as pref_label,
             COUNT(DISTINCT b.beneficiary_id) as count
         FROM beneficiaries b
@@ -695,10 +808,19 @@ def get_filtered_dashboard_data(
     query_records = f"""
         SELECT 
             b.beneficiary_id,
-            CASE WHEN b.preferred_language = 'hi' THEN 'Hindi' ELSE 'English' END as language,
+            CASE 
+                WHEN b.preferred_language = 'hi' THEN 'Hindi' 
+                WHEN b.preferred_language = 'mr' THEN 'Marathi' 
+                ELSE 'English' 
+            END as language,
             b.district,
             COALESCE(p.education, 'N/A') as education,
-            COALESCE(p.employment_preference, 'Self-Employment') as preference,
+            CASE 
+                WHEN p.employment_preference LIKE '%Self%' THEN 'Self-Employment'
+                WHEN p.employment_preference LIKE '%Wage%' OR p.employment_preference LIKE '%Job%' OR p.employment_preference LIKE '%Salaried%' THEN 'Wage-Employment'
+                WHEN p.employment_preference LIKE '%Any%' THEN 'Any'
+                ELSE 'Unknown'
+            END as preference,
             COALESCE(r.job_role, 'Pending Assessment') as recommended_nsqf_role,
             COALESCE(r.sector, 'General') as sector,
             COALESCE(ROUND(r.match_score, 1), 0.0) as match_score,
@@ -729,7 +851,7 @@ def get_filtered_dashboard_data(
         "recent_beneficiaries": records,
         "total_profiles": total_beneficiaries,
         "self_employment_percentage": round(
-            (pref_dist.get("Self-Employment (GIA Grant)", 0) / max(sum(pref_dist.values()), 1)) * 100, 1
+            (pref_dist.get("Self-Employment", 0) / max(sum(pref_dist.values()), 1)) * 100, 1
         ),
         "records": records
     }

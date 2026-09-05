@@ -20,12 +20,19 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
 CREATE TABLE IF NOT EXISTS profiles (
     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
     beneficiary_id TEXT NOT NULL,
+    age INTEGER,
     education TEXT,
+    current_occupation TEXT,
+    work_experience TEXT,
+    family_occupation TEXT,
     skills_json TEXT DEFAULT '[]',
     interests_json TEXT DEFAULT '[]',
+    aspirations TEXT,
     district TEXT,
+    local_context TEXT,
     mobility TEXT DEFAULT 'Low',
     employment_preference TEXT DEFAULT 'Self-Employment',
+    constraints TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (beneficiary_id) REFERENCES beneficiaries (beneficiary_id) ON DELETE CASCADE
 );

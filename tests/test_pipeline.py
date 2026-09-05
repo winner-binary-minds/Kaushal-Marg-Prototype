@@ -70,8 +70,8 @@ class TestRecommendationPipeline:
         
         assert "No conversation history" in str(exc.value)
     
-    def test_pipeline_no_recommendations_raises_error(self):
-        """Test pipeline fails if no recommendations generated."""
+    def test_pipeline_no_recommendations_returns_empty(self):
+        """Test pipeline returns empty structures if no recommendations generated."""
         from ai.conversation import Message
         mock_manager = Mock()
         mock_manager.get_history.return_value = [
@@ -86,7 +86,8 @@ class TestRecommendationPipeline:
             with patch("integration.pipeline.recommend_jobs") as mock_recommend:
                 mock_recommend.return_value = []  # Empty recommendations
                 
-                with pytest.raises(ValueError) as exc:
-                    run_recommendation_pipeline(mock_manager)
+                result = run_recommendation_pipeline(mock_manager)
                 
-                assert "No job recommendations" in str(exc.value)
+                assert result["recommendations"] == []
+                assert result["skill_gaps"] == {}
+                assert result["pathway"] == {}

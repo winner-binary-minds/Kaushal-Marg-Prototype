@@ -67,12 +67,19 @@ class TestDatabaseModule(unittest.TestCase):
 
         profile_id = save_profile(
             beneficiary_id=ben_id,
+            age=25,
             education="10th Pass",
+            current_occupation="Farm helper",
+            work_experience="3 years",
+            family_occupation="Farming",
             skills=["Tractor operation", "Basic farming"],
             interests=["Agriculture", "Machinery"],
+            aspirations="Own a tractor",
             district="Indore",
+            local_context="Rural village outside Indore",
             mobility="Low",
             employment_preference="Self-Employment",
+            constraints="None",
             db_path=self.temp_db_path
         )
         self.assertIsInstance(profile_id, int)
@@ -81,7 +88,14 @@ class TestDatabaseModule(unittest.TestCase):
         profile = get_profile(ben_id, self.temp_db_path)
         self.assertIsNotNone(profile)
         self.assertEqual(profile["name"], "Ramesh Kumar")
+        self.assertEqual(profile["age"], 25)
         self.assertEqual(profile["education"], "10th Pass")
+        self.assertEqual(profile["current_occupation"], "Farm helper")
+        self.assertEqual(profile["work_experience"], "3 years")
+        self.assertEqual(profile["family_occupation"], "Farming")
+        self.assertEqual(profile["aspirations"], "Own a tractor")
+        self.assertEqual(profile["local_context"], "Rural village outside Indore")
+        self.assertEqual(profile["constraints"], "None")
         self.assertEqual(len(profile["skills"]), 2)
         self.assertIn("Tractor operation", profile["skills"])
         self.assertEqual(profile["district"], "Indore")

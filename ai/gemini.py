@@ -14,7 +14,10 @@ Key responsibilities:
 
 import os
 import logging
-from typing import Type, TypeVar
+from typing import Any, Type, TypeVar
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import pydantic
 from google import genai
@@ -42,6 +45,22 @@ class GeminiValidationError(Exception):
     pass
 
 
+class GeminiQuotaError(GeminiAPIError):
+    """Raised when API quota is exhausted (HTTP 429)."""
+    def __init__(self, message: str, retry_delay: int = 40):
+        super().__init__(message)
+        self.retry_delay = retry_delay
+
+
+# ---------------------------------------------------------------------------
+# Centralized Model Configuration
+# ---------------------------------------------------------------------------
+from config import GEMINI_CHAT_MODEL
+
+GEMINI_MODEL: str = GEMINI_CHAT_MODEL
+DEFAULT_MODEL: str = GEMINI_MODEL
+
+
 class GeminiClient:
     """
     Secure wrapper around the Google Gemini API via Interactions API.
@@ -59,8 +78,8 @@ class GeminiClient:
         max_output_tokens (int): Maximum tokens in response
     """
     
-    # Current stable model for google-genai SDK v2.x
-    DEFAULT_MODEL = "gemini-1.5-flash"  # Fast, general-purpose, production-stable
+    # Current supported model for google-genai SDK v2.x
+    DEFAULT_MODEL = GEMINI_MODEL
     DEFAULT_MAX_OUTPUT_TOKENS = 1024
     
     def __init__(
@@ -116,6 +135,32 @@ class GeminiClient:
                 f"Failed to initialize Gemini client: {str(e)}"
             ) from e
     
+    def _call_generate_content(
+        self,
+        contents: Any,
+        config: types.GenerateContentConfig,
+    ) -> Any:
+        """Invokes generate_content."""
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=config,
+            )
+            return resp
+        except Exception as e:
+            err_str = str(e).lower()
+            
+            # Check for 429 Resource Exhausted / Quota Limits
+            if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
+                # Try to parse retry delay from the error message if it says e.g. "retry in 40s"
+                import re
+                delay_match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str)
+                delay = int(float(delay_match.group(1))) if delay_match else 40
+                raise GeminiQuotaError(f"Gemini API Quota Exceeded. {e}", retry_delay=delay)
+
+            raise e
+
     def generate_text(self, prompt: str) -> str:
         """
         Generate text from a prompt using Gemini.
@@ -140,8 +185,7 @@ class GeminiClient:
         
         try:
             # Call Gemini API via models.generate_content()
-            response = self._client.models.generate_content(
-                model=self.model,
+            response = self._call_generate_content(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=self.max_output_tokens,
@@ -202,8 +246,7 @@ class GeminiClient:
         
         try:
             # Call Gemini with structured output via response_mime_type + response_schema
-            response = self._client.models.generate_content(
-                model=self.model,
+            response = self._call_generate_content(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=self.max_output_tokens,
