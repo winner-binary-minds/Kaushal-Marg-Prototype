@@ -85,7 +85,7 @@ def render_tts_widget(text: str, lang_code: str, widget_id: str, button_label: s
             {button_label}
         </button>
     """
-    st.components.v1.html(js, height=50)
+    st.html(js)
 
 
 def render_recommendations_page():
@@ -99,7 +99,7 @@ def render_recommendations_page():
     head_col1, head_col2 = st.columns([2.8, 1.2])
     with head_col1:
         if active_lang_code == "hi":
-            st.markdown("""
+            st.html("""
                 <div style="margin-bottom: 8px;">
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
                         🎯 आपके लिए सरकारी हुनर और रोज़गार | Recommended Pathways
@@ -108,9 +108,9 @@ def render_recommendations_page():
                         NSQF-Aligned Skilling Recommendations & "My Skill Journey" under PM-AJAY (GIA Component)
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
         elif active_lang_code == "mr":
-            st.markdown("""
+            st.html("""
                 <div style="margin-bottom: 8px;">
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
                         🎯 आपल्यासाठी सरकारी कौशल्य व रोजगार | Recommended Pathways
@@ -119,9 +119,9 @@ def render_recommendations_page():
                         NSQF-Aligned Skilling Recommendations & "My Skill Journey" under PM-AJAY (GIA Component)
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
         else:
-            st.markdown("""
+            st.html("""
                 <div style="margin-bottom: 8px;">
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">
                         🎯 Your NSQF Skilling & Livelihood Pathways
@@ -130,7 +130,7 @@ def render_recommendations_page():
                         Official Sector Skill Council Recommendations & 4-Stage Pathway under PM-AJAY (GIA Component)
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
     with head_col2:
         lang_opts = ["🇮🇳 हिंदी", "🇬🇧 English", "🇮🇳 मराठी"]
@@ -171,7 +171,7 @@ def render_recommendations_page():
         safe_dist = html.escape(str(profile.get('district') or 'None'))
         safe_skills = html.escape(', '.join(profile.get('skills', [])) if profile.get('skills') else 'None')
         safe_pref = html.escape(str(profile.get('employment_preference') or 'Unknown'))
-        st.markdown(f"""
+        st.html(f"""
             <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-left: 5px solid #3B82F6; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                     <div>
@@ -187,7 +187,7 @@ def render_recommendations_page():
                     </div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     # 10 Synthetic Demo Profile Switcher
     st.markdown(f"##### {'🔄 10 नमूना प्रोफ़ाइल के अवसर देखें (Switch from 10 Demo Profiles):' if active_lang_code == 'hi' else ('🔄 10 नमुना प्रोफाईल तपासा (Switch Demo Profile):' if active_lang_code == 'mr' else '🔄 Switch from 10 Synthetic Demo Profiles:')}")
@@ -323,21 +323,21 @@ def render_recommendations_page():
 
     # RANK #1 CARD (Featured)
     with col_r1:
-        st.markdown(f"""
-            <div style="background: #FFFFFF; border: 2px solid #2563EB; border-top: 6px solid #2563EB; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                <div style="background: #EFF6FF; color: #1E40AF; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+        st.html(f"""
+            <div style="background: #FFFFFF; border: 2px solid #2D5A4C; border-top: 6px solid #2D5A4C; border-radius: 12px; padding: 20px; height: 100%; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); transition: transform 0.2s ease;">
+                <div style="background: #E8F3EF; color: #2D5A4C; font-weight: 700; font-size: 0.85rem; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 12px; border: 1px solid #C6E0D5;">
                     🥇 {'शीर्ष 1 चयन / Rank #1 Fit' if active_lang_code != 'en' else '🥇 Rank #1 Best Match'}
                 </div>
-                <h3 style="color: #1E3A8A; margin: 0 0 6px 0; font-size: 1.3rem;">{top_1['job_role']}</h3>
-                <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                <h3 style="color: #1A202C; margin: 0 0 8px 0; font-size: 1.3rem; font-weight: 800;">{top_1['job_role']}</h3>
+                <div style="color: #4A5568; font-size: 0.95rem; margin-bottom: 16px;">
                     🏢 <b>Sector:</b> {top_1['sector']}<br>
                     🎖️ <b>NSQF Level:</b> Level {top_1.get('nsqf_level', 4)}
                 </div>
-                <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
-                    <span style="font-size: 2.2rem; font-weight: 800; color: #047857;">{top_1['score']}%</span>
-                    <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'योग्यता मेल (Match Score)' if active_lang_code != 'en' else 'Match Score'}</span>
+                <div style="display: flex; align-items: baseline; margin-bottom: 12px;">
+                    <span style="font-size: 2.2rem; font-weight: 800; color: #2D5A4C;">{top_1['score']}%</span>
+                    <span style="color: #718096; font-size: 0.95rem; margin-left: 8px; font-weight: 500;">{'योग्यता मेल (Match)' if active_lang_code != 'en' else 'Match Score'}</span>
                 </div>
-                <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                <div style="font-size: 0.75rem; color: #718096; margin-bottom: 16px; background: #F8FAFC; padding: 6px 8px; border-radius: 6px; border: 1px solid #E2E8F0;">
                     <b>Breakdown:</b> Edu: {top_1['score_breakdown']['education']['score']}/{top_1['score_breakdown']['education']['max_score']} | 
                     Skill: {top_1['score_breakdown']['skill']['score']}/{top_1['score_breakdown']['skill']['max_score']} | 
                     Int: {top_1['score_breakdown']['interest']['score']}/{top_1['score_breakdown']['interest']['max_score']} | 
@@ -345,34 +345,34 @@ def render_recommendations_page():
                     Pref: {top_1['score_breakdown']['employment_preference']['score']}/{top_1['score_breakdown']['employment_preference']['max_score']} | 
                     Loc: {top_1['score_breakdown']['local_opportunity']['score']}/{top_1['score_breakdown']['local_opportunity']['max_score']}
                 </div>
-                <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #166534; margin-bottom: 10px;">
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; color: #2D3748; margin-bottom: 12px;">
                     💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_1['employment_type']}
                 </div>
-                <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
-                    <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                <div style="font-size: 0.9rem; color: #4A5568; line-height: 1.5;">
+                    <b style="color: #2D3748;">💡 {'कारण / Rationale:' if active_lang_code != 'en' else 'Rationale:'}</b><br>
                     {' • '.join(top_1['why_recommended'][:2])}
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     # RANK #2 CARD
     with col_r2:
         if top_2:
-            st.markdown(f"""
-                <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-top: 6px solid #64748B; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                    <div style="background: #F1F5F9; color: #475569; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+            st.html(f"""
+                <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-top: 6px solid #94A3B8; border-radius: 12px; padding: 20px; height: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                    <div style="background: #F8FAFC; color: #475569; font-weight: 700; font-size: 0.85rem; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 12px; border: 1px solid #E2E8F0;">
                         🥈 {'रैंक #2 / Rank #2' if active_lang_code != 'en' else '🥈 Rank #2'}
                     </div>
-                    <h3 style="color: #1E293B; margin: 0 0 6px 0; font-size: 1.2rem;">{top_2['job_role']}</h3>
-                    <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                    <h3 style="color: #1A202C; margin: 0 0 8px 0; font-size: 1.2rem; font-weight: 700;">{top_2['job_role']}</h3>
+                    <div style="color: #4A5568; font-size: 0.95rem; margin-bottom: 16px;">
                         🏢 <b>Sector:</b> {top_2['sector']}<br>
                         🎖️ <b>NSQF Level:</b> Level {top_2.get('nsqf_level', 4)}
                     </div>
-                    <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
-                        <span style="font-size: 2.0rem; font-weight: 700; color: #2563EB;">{top_2['score']}%</span>
-                        <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
+                    <div style="display: flex; align-items: baseline; margin-bottom: 12px;">
+                        <span style="font-size: 2.0rem; font-weight: 700; color: #475569;">{top_2['score']}%</span>
+                        <span style="color: #718096; font-size: 0.95rem; margin-left: 8px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
                     </div>
-                    <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                    <div style="font-size: 0.75rem; color: #718096; margin-bottom: 16px; background: #F8FAFC; padding: 6px 8px; border-radius: 6px; border: 1px solid #E2E8F0;">
                         <b>Breakdown:</b> Edu: {top_2['score_breakdown']['education']['score']}/{top_2['score_breakdown']['education']['max_score']} | 
                         Skill: {top_2['score_breakdown']['skill']['score']}/{top_2['score_breakdown']['skill']['max_score']} | 
                         Int: {top_2['score_breakdown']['interest']['score']}/{top_2['score_breakdown']['interest']['max_score']} | 
@@ -380,34 +380,34 @@ def render_recommendations_page():
                         Pref: {top_2['score_breakdown']['employment_preference']['score']}/{top_2['score_breakdown']['employment_preference']['max_score']} | 
                         Loc: {top_2['score_breakdown']['local_opportunity']['score']}/{top_2['score_breakdown']['local_opportunity']['max_score']}
                     </div>
-                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #475569; margin-bottom: 10px;">
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; color: #475569; margin-bottom: 12px;">
                         💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_2['employment_type']}
                     </div>
-                    <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
-                        <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                    <div style="font-size: 0.9rem; color: #4A5568; line-height: 1.5;">
+                        <b style="color: #2D3748;">💡 {'कारण / Rationale:' if active_lang_code != 'en' else 'Rationale:'}</b><br>
                         {' • '.join(top_2['why_recommended'][:2])}
                     </div>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
     # RANK #3 CARD
     with col_r3:
         if top_3:
-            st.markdown(f"""
-                <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-top: 6px solid #94A3B8; border-radius: 10px; padding: 18px; height: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                    <div style="background: #F1F5F9; color: #475569; font-weight: 700; font-size: 0.85rem; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;">
+            st.html(f"""
+                <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-top: 6px solid #CBD5E1; border-radius: 12px; padding: 20px; height: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                    <div style="background: #F8FAFC; color: #64748B; font-weight: 700; font-size: 0.85rem; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 12px; border: 1px solid #E2E8F0;">
                         🥉 {'रैंक #3 / Rank #3' if active_lang_code != 'en' else '🥉 Rank #3'}
                     </div>
-                    <h3 style="color: #1E293B; margin: 0 0 6px 0; font-size: 1.2rem;">{top_3['job_role']}</h3>
-                    <div style="color: #4B5563; font-size: 0.95rem; margin-bottom: 12px;">
+                    <h3 style="color: #1A202C; margin: 0 0 8px 0; font-size: 1.2rem; font-weight: 700;">{top_3['job_role']}</h3>
+                    <div style="color: #4A5568; font-size: 0.95rem; margin-bottom: 16px;">
                         🏢 <b>Sector:</b> {top_3['sector']}<br>
                         🎖️ <b>NSQF Level:</b> Level {top_3.get('nsqf_level', 4)}
                     </div>
-                    <div style="display: flex; align-items: baseline; margin-bottom: 8px;">
-                        <span style="font-size: 2.0rem; font-weight: 700; color: #2563EB;">{top_3['score']}%</span>
-                        <span style="color: #64748B; font-size: 0.95rem; margin-left: 6px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
+                    <div style="display: flex; align-items: baseline; margin-bottom: 12px;">
+                        <span style="font-size: 2.0rem; font-weight: 700; color: #64748B;">{top_3['score']}%</span>
+                        <span style="color: #718096; font-size: 0.95rem; margin-left: 8px;">{'मेल (Score)' if active_lang_code != 'en' else 'Score'}</span>
                     </div>
-                    <div style="font-size: 0.75rem; color: #64748B; margin-bottom: 14px; background: #F8FAFC; padding: 4px; border-radius: 4px;">
+                    <div style="font-size: 0.75rem; color: #718096; margin-bottom: 16px; background: #F8FAFC; padding: 6px 8px; border-radius: 6px; border: 1px solid #E2E8F0;">
                         <b>Breakdown:</b> Edu: {top_3['score_breakdown']['education']['score']}/{top_3['score_breakdown']['education']['max_score']} | 
                         Skill: {top_3['score_breakdown']['skill']['score']}/{top_3['score_breakdown']['skill']['max_score']} | 
                         Int: {top_3['score_breakdown']['interest']['score']}/{top_3['score_breakdown']['interest']['max_score']} | 
@@ -415,15 +415,15 @@ def render_recommendations_page():
                         Pref: {top_3['score_breakdown']['employment_preference']['score']}/{top_3['score_breakdown']['employment_preference']['max_score']} | 
                         Loc: {top_3['score_breakdown']['local_opportunity']['score']}/{top_3['score_breakdown']['local_opportunity']['max_score']}
                     </div>
-                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 12px; font-size: 0.88rem; color: #475569; margin-bottom: 10px;">
+                    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; color: #64748B; margin-bottom: 12px;">
                         💼 <b>{'पसंद:' if active_lang_code != 'en' else 'Goal:'}</b> {top_3['employment_type']}
                     </div>
-                    <div style="font-size: 0.88rem; color: #334155; line-height: 1.4;">
-                        <b>💡 {'कारण / Rationale:' if active_lang_code != 'en' else '💡 Rationale:'}</b><br>
+                    <div style="font-size: 0.9rem; color: #4A5568; line-height: 1.5;">
+                        <b style="color: #2D3748;">💡 {'कारण / Rationale:' if active_lang_code != 'en' else 'Rationale:'}</b><br>
                         {' • '.join(top_3['why_recommended'][:2])}
                     </div>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
     # -------------------------------------------------------------
     # 6. Skill Gap Analysis & Local Cluster Details
@@ -433,7 +433,7 @@ def render_recommendations_page():
 
     g1, g2 = st.columns(2)
     with g1:
-        st.markdown(f"""
+        st.html(f"""
             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px;">
                 <h4 style="color: #1E3A8A; margin-top: 0;">🛠️ {'मौजूदा हुनर बनाम ज़रूरी प्रशिक्षण' if active_lang_code != 'en' else 'Existing Skills vs Training Gap'}</h4>
                 <p style="color: #475569; font-size: 0.95rem;">
@@ -445,10 +445,10 @@ def render_recommendations_page():
                     {''.join([f"<span class='skill-tag-missing'>⚡ {s}</span>" for s in top_1['missing_skills']]) if top_1['missing_skills'] else "<span style='color:#047857;'>✓ 100% skill requirements matched!</span>"}
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     with g2:
-        st.markdown(f"""
+        st.html(f"""
             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px;">
                 <h4 style="color: #1E3A8A; margin-top: 0;">📍 {'स्थानीय जिला अवसर और PM-AJAY सहायता' if active_lang_code != 'en' else 'Local District Opportunity & PM-AJAY Support'}</h4>
                 <p style="color: #1E293B; font-size: 0.95rem; line-height: 1.5;">
@@ -461,7 +461,7 @@ def render_recommendations_page():
                     📌 <b>Note:</b> No verified local opportunity data available for this specific role in your district.
                 </div>'''}
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     # -------------------------------------------------------------
     # 7. "My Skill Journey" 4-Stage Pathway Roadmap
@@ -478,45 +478,45 @@ def render_recommendations_page():
     p_col1, p_col2, p_col3, p_col4 = st.columns(4)
 
     with p_col1:
-        st.markdown(f"""
-            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #3B82F6; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-weight: 700; color: #1E40AF; font-size: 0.95rem;">📍 1. {'वर्तमान स्थिति' if active_lang_code != 'en' else 'Current State'}</div>
-                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+        st.html(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-top: 4px solid #94A3B8; border-radius: 12px; padding: 16px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                <div style="font-weight: 700; color: #475569; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">📍 1. {'वर्तमान स्थिति' if active_lang_code != 'en' else 'Current State'}</div>
+                <p style="font-size: 0.88rem; color: #4A5568; margin: 8px 0 0 0; line-height: 1.4;">
                     {pathway.get('current_state', 'Candidate Profile')}
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     with p_col2:
-        st.markdown(f"""
-            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #F59E0B; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-weight: 700; color: #B45309; font-size: 0.95rem;">📚 2. {'तकनीकी प्रशिक्षण' if active_lang_code != 'en' else 'Technical Training'}</div>
-                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+        st.html(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-top: 4px solid #C6E0D5; border-radius: 12px; padding: 16px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                <div style="font-weight: 700; color: #2D5A4C; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">📚 2. {'तकनीकी प्रशिक्षण' if active_lang_code != 'en' else 'Technical Training'}</div>
+                <p style="font-size: 0.88rem; color: #4A5568; margin: 8px 0 0 0; line-height: 1.4;">
                     {' • '.join(pathway.get('training_stage', {}).get('learning_modules', ['NSQF Core Curriculum']))}
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     with p_col3:
-        st.markdown(f"""
-            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-top: 4px solid #8B5CF6; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-weight: 700; color: #6D28D9; font-size: 0.95rem;">🛠️ 3. {'व्यावहारिक अनुभव' if active_lang_code != 'en' else 'Practical Lab'}</div>
-                <p style="font-size: 0.88rem; color: #334155; margin: 8px 0 0 0;">
+        st.html(f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-top: 4px solid #95CBB3; border-radius: 12px; padding: 16px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                <div style="font-weight: 700; color: #1F4035; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">🛠️ 3. {'व्यावहारिक अनुभव' if active_lang_code != 'en' else 'Practical Lab'}</div>
+                <p style="font-size: 0.88rem; color: #4A5568; margin: 8px 0 0 0; line-height: 1.4;">
                     {' • '.join(pathway.get('practical_stage', {}).get('practical_tasks', ['Hands-on Workshop Practice']))}
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
     with p_col4:
-        st.markdown(f"""
-            <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-top: 4px solid #16A34A; border-radius: 8px; padding: 14px; height: 100%;">
-                <div style="font-weight: 700; color: #166534; font-size: 0.95rem;">🎯 4. {'लक्ष्य रोजगार' if active_lang_code != 'en' else 'Target Livelihood'}</div>
-                <p style="font-size: 0.88rem; color: #14532D; margin: 8px 0 0 0;">
-                    <b>{top_1['job_role']}</b><br>
+        st.html(f"""
+            <div style="background: #E8F3EF; border: 1px solid #C6E0D5; border-top: 4px solid #2D5A4C; border-radius: 12px; padding: 16px; height: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                <div style="font-weight: 700; color: #2D5A4C; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">🎯 4. {'लक्ष्य रोजगार' if active_lang_code != 'en' else 'Target Livelihood'}</div>
+                <p style="font-size: 0.88rem; color: #1F4035; margin: 8px 0 0 0; line-height: 1.4;">
+                    <b style="color: #1A202C;">{top_1['job_role']}</b><br>
                     {top_1['employment_type']} (Potential PM-AJAY Pathway)
                 </p>
             </div>
-        """, unsafe_allow_html=True)
+        """)
 
 
 if __name__ == "__main__":

@@ -156,7 +156,7 @@ def render_tts_player(text: str, lang_code: str, element_key: str):
             🔊 {'सुनें (Listen)' if lang_code == 'hi' else ('ऐका (Listen)' if lang_code == 'mr' else 'Listen Aloud')}
         </button>
     """
-    st.components.v1.html(js_code, height=42)
+    st.html(js_code)
 
 
 def restart_interview(lang_code: str):
@@ -206,32 +206,32 @@ def render_beneficiary_page():
     top_col1, top_col2 = st.columns([2.8, 1.2])
     with top_col1:
         if active_lang_code == "hi":
-            st.markdown("""
+            st.html("""
                 <div>
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">🎙️ कौशल सहायक | Beneficiary Assistant</h1>
                     <p style="color: #4B5563; font-size: 1.02rem; margin: 4px 0 0 0;">
                         माइक्रोफ़ोन से बोलकर या लिखकर अपनी जानकारी दें और सही सरकारी हुनर व PM-AJAY आजीविका जानें।
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
         elif active_lang_code == "mr":
-            st.markdown("""
+            st.html("""
                 <div>
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">🎙️ कौशल्य सहाय्यक | Beneficiary Assistant</h1>
                     <p style="color: #4B5563; font-size: 1.02rem; margin: 4px 0 0 0;">
                         मायक्रोफोनद्वारे बोलून किंवा लिहून माहिती द्या आणि योग्य NSQF कौशल्य व PM-AJAY रोजगार शोधा.
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
         else:
-            st.markdown("""
+            st.html("""
                 <div>
                     <h1 style="color: #1E3A8A; font-size: 2.1rem; margin: 0;">🎙️ Beneficiary Voice Assistant</h1>
                     <p style="color: #4B5563; font-size: 1.02rem; margin: 4px 0 0 0;">
                         Speak into the microphone or type to find NSQF-aligned skilling pathways and PM-AJAY livelihood opportunities.
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
     
     with top_col2:
         lang_options = ["🇮🇳 हिंदी", "🇬🇧 English", "🇮🇳 मराठी"]
@@ -276,29 +276,48 @@ def render_beneficiary_page():
     # -------------------------------------------------------------
     # 2. Step Progress Indicator
     # -------------------------------------------------------------
-    st.markdown("<hr style='margin: 10px 0 16px 0;'>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
     
-    p1, p2, p3, p4 = st.columns([1, 1, 1, 0.8])
-    with p1:
-        if step == 1:
-            st.info("🔹 **1. " + ("बातचीत / Speak" if active_lang_code == "hi" else ("संभाषण / Speak" if active_lang_code == "mr" else "Interview")) + "**\n\nActive")
-        else:
-            st.success("✅ **1. " + ("बातचीत / Speak" if active_lang_code == "hi" else ("संभाषण / Speak" if active_lang_code == "mr" else "Interview")) + "**\n\nDone")
-    with p2:
-        if step == 2:
-            st.info("🔹 **2. " + ("प्रोफ़ाइल पुष्टि / Review" if active_lang_code == "hi" else ("माहिती खात्री / Review" if active_lang_code == "mr" else "Review Profile")) + "**\n\nActive")
-        elif step > 2:
-            st.success("✅ **2. " + ("प्रोफ़ाइल पुष्टि / Review" if active_lang_code == "hi" else ("माहिती खात्री / Review" if active_lang_code == "mr" else "Review Profile")) + "**\n\nDone")
-        else:
-            st.markdown("⚪ **2. Review Profile**\n\nPending")
-    with p3:
-        if step == 3:
-            st.info("🔹 **3. " + ("अवसर / Recommendations" if active_lang_code == "hi" else ("संधी / Recommendations" if active_lang_code == "mr" else "Recommendations")) + "**\n\nActive")
-        else:
-            st.markdown("⚪ **3. Recommendations**\n\nPending")
-    with p4:
-        st.write("")
-        if st.button("🔄 " + ("नया असेसमेंट शुरू करें / Start New Assessment" if active_lang_code == "hi" else ("नवीन असेसमेंट सुरू करा / Start New Assessment" if active_lang_code == "mr" else "Start New Beneficiary Assessment")), key="btn_restart_interview", use_container_width=True):
+    # Modern horizontal stepper
+    def get_step_style(current_step, target_step):
+        if current_step > target_step: # Done
+            return "background-color: #E8F3EF; color: #2D5A4C; border: 1px solid #C6E0D5;"
+        elif current_step == target_step: # Active
+            return "background-color: #2D5A4C; color: white; border: 1px solid #2D5A4C;"
+        else: # Pending
+            return "background-color: #F8FAFC; color: #94A3B8; border: 1px solid #E2E8F0;"
+            
+    step1_style = get_step_style(step, 1)
+    step2_style = get_step_style(step, 2)
+    step3_style = get_step_style(step, 3)
+    
+    st.html(f"""
+<div style="display: flex; justify-content: space-between; align-items: center; max-width: 800px; margin: 0 auto 30px auto;">
+    <!-- Step 1 -->
+    <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
+        <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; {step1_style} z-index: 2;">1</div>
+        <div style="margin-top: 8px; font-size: 0.85rem; font-weight: {600 if step >= 1 else 400}; color: {'#2D3748' if step >= 1 else '#94A3B8'};">Interview</div>
+    </div>
+    <div style="height: 2px; background-color: {'#C6E0D5' if step > 1 else '#E2E8F0'}; flex: 2; margin-top: -24px;"></div>
+    
+    <!-- Step 2 -->
+    <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
+        <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; {step2_style} z-index: 2;">2</div>
+        <div style="margin-top: 8px; font-size: 0.85rem; font-weight: {600 if step >= 2 else 400}; color: {'#2D3748' if step >= 2 else '#94A3B8'};">Review</div>
+    </div>
+    <div style="height: 2px; background-color: {'#C6E0D5' if step > 2 else '#E2E8F0'}; flex: 2; margin-top: -24px;"></div>
+    
+    <!-- Step 3 -->
+    <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
+        <div style="width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; {step3_style} z-index: 2;">3</div>
+        <div style="margin-top: 8px; font-size: 0.85rem; font-weight: {600 if step >= 3 else 400}; color: {'#2D3748' if step >= 3 else '#94A3B8'};">Recommendations</div>
+    </div>
+</div>
+""")
+    
+    col_reset1, col_reset2, col_reset3 = st.columns([1, 1, 1])
+    with col_reset3:
+        if st.button("🔄 " + ("नया असेसमेंट / Restart" if active_lang_code == "hi" else ("नवीन असेसमेंट / Restart" if active_lang_code == "mr" else "Start New Assessment")), key="btn_restart_interview", use_container_width=True):
             restart_interview(active_lang_code)
             st.rerun()
 
@@ -309,7 +328,7 @@ def render_beneficiary_page():
         col_input, col_chat = st.columns([1.1, 1])
 
         with col_input:
-            st.markdown("""
+            st.html("""
                 <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px; margin-bottom: 14px;">
                     <h3 style="color: #1E3A8A; margin: 0 0 4px 0; font-size: 1.15rem;">
                         🎙️ Browser Microphone / Voice Input
@@ -318,7 +337,7 @@ def render_beneficiary_page():
                         Click the microphone below to record speech. Audio bytes are captured and transcribed via Gemini Multimodal STT.
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
             # REAL STREAMLIT BROWSER MICROPHONE RECORDING WIDGET
             rec_label = (
@@ -564,14 +583,14 @@ def render_beneficiary_page():
 
             # Clearly Labelled Separate Demo Scenario Tool
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("""
+            st.html("""
                 <div style="background-color: #FEF3C7; border: 1px solid #FDE68A; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
                     <b style="color: #92400E;">⚡ Demo Scenarios (Pre-Loaded Test Profiles)</b><br>
                     <span style="color: #78350F; font-size: 0.85rem;">
                         Judges & Evaluators can instantly test 10 realistic synthetic profiles across domains without microphone setup.
                     </span>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
             
             demo_labels = [
                 f"{p['name']} ({p['domain_tag']} • {p['district']} • {p['employment_preference']})"
@@ -617,7 +636,7 @@ def render_beneficiary_page():
 
         # Chat Transcript Column
         with col_chat:
-            st.markdown("""
+            st.html("""
                 <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px; margin-bottom: 14px;">
                     <h3 style="color: #1E3A8A; margin: 0 0 4px 0; font-size: 1.15rem;">
                         💬 Conversation Transcript / बातचीत का विवरण
@@ -626,26 +645,26 @@ def render_beneficiary_page():
                         Live multilingual conversation transcript between assistant and beneficiary.
                     </p>
                 </div>
-            """, unsafe_allow_html=True)
+            """)
 
             # Chat Bubbles
             for i, msg in enumerate(st.session_state["chat_messages"]):
                 safe_text = html.escape(str(msg['text']))
                 if msg["sender"] == "assistant":
-                    st.markdown(f"""
-                        <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-left: 5px solid #2563EB; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;">
-                            <b style="color: #1E40AF;">🤖 Kaushal Marg Assistant:</b><br>
-                            <span style="color: #1E293B; font-size: 0.95rem; white-space: pre-line;">{safe_text}</span>
+                    st.html(f"""
+                        <div style="background-color: #E8F3EF; border: 1px solid #C6E0D5; border-left: 5px solid #2D5A4C; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                            <b style="color: #2D5A4C; display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">🎙️ Kaushal Marg Assistant:</b>
+                            <span style="color: #2D3748; font-size: 0.95rem; line-height: 1.5; white-space: pre-line;">{safe_text}</span>
                         </div>
-                    """, unsafe_allow_html=True)
+                    """)
                     render_tts_player(msg["text"], active_lang_code, f"chat_tts_{i}")
                 else:
-                    st.markdown(f"""
-                        <div style="background-color: #F0FDF4; border: 1px solid #BBF7D0; border-right: 5px solid #16A34A; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; text-align: right;">
-                            <b style="color: #166534;">👤 You (Beneficiary):</b><br>
-                            <span style="color: #1E293B; font-size: 0.95rem; white-space: pre-line;">{safe_text}</span>
+                    st.html(f"""
+                        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-right: 5px solid #64748B; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: right; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                            <b style="color: #475569; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 6px;">👤 You (Beneficiary):</b>
+                            <span style="color: #2D3748; font-size: 0.95rem; line-height: 1.5; white-space: pre-line;">{safe_text}</span>
                         </div>
-                    """, unsafe_allow_html=True)
+                    """)
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("➡️ " + ("आगे बढ़ें: प्रोफ़ाइल पुष्टि / Continue to Profile Review" if active_lang_code == "hi" else ("पुढे जा: माहिती खात्री / Continue" if active_lang_code == "mr" else "Continue to Profile Review ➡️")), type="primary", use_container_width=True, key="btn_goto_step2"):
