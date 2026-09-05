@@ -18,7 +18,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from pages.beneficiary import get_conversation_manager, restart_interview, init_session_state
+from ui.beneficiary import get_conversation_manager, restart_interview, init_session_state
 from ai.conversation import ConversationManager
 from ai.gemini import GeminiAPIError
 import streamlit as st
@@ -41,7 +41,7 @@ class TestConversationUI(unittest.TestCase):
 
     def setUp(self):
         """Set up a fresh mock session state before each test."""
-        self.patcher = patch("pages.beneficiary.st.session_state", new_callable=MockSessionState)
+        self.patcher = patch("ui.beneficiary.st.session_state", new_callable=MockSessionState)
         self.mock_session = self.patcher.start()
         
         # We also need to patch logger to avoid noise, but not strictly necessary

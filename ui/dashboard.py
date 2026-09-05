@@ -18,11 +18,12 @@ def render_dashboard_page():
     """Renders the comprehensive PM-AJAY GIA Skilling & Livelihood Analytics Dashboard."""
     import os
     import hmac
+    from config import ADMIN_PASSWORD
     
     # -------------------------------------------------------------
     # 0. Admin Authentication
     # -------------------------------------------------------------
-    expected_password = os.getenv("ADMIN_PASSWORD")
+    expected_password = ADMIN_PASSWORD
     
     if not expected_password:
         st.error("Admin dashboard cannot be loaded: ADMIN_PASSWORD environment variable is missing.")
@@ -68,7 +69,7 @@ def render_dashboard_page():
     else:
         st.info("✅ **REAL DATA.** You are currently viewing actual beneficiary records from the Current Prototype Database.")
         
-    st.markdown(f"""
+    st.html(f"""
         <div style="border-bottom: 2px solid #E2E8F0; padding-bottom: 12px; margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                 <div>
@@ -84,7 +85,7 @@ def render_dashboard_page():
                 </div>
             </div>
         </div>
-    """, unsafe_allow_html=True)
+    """)
     
     if st.button("🚪 Logout", key="btn_admin_logout"):
         st.session_state["admin_authenticated"] = False
@@ -167,31 +168,25 @@ def render_dashboard_page():
     # 4. Top KPI Metric Cards
     # -------------------------------------------------------------
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    
+    def render_metric_card(title, value, subtitle, icon=""):
+        return f"""
+            <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); height: 100%;">
+                <div style="color: #4A5568; font-size: 0.9rem; font-weight: 600; margin-bottom: 8px;">{icon} {title}</div>
+                <div style="color: #1A202C; font-size: 2rem; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.5px;">{value}</div>
+                <div style="color: #2D5A4C; font-size: 0.8rem; font-weight: 500; background: #E8F3EF; padding: 4px 8px; border-radius: 4px; display: inline-block;">{subtitle}</div>
+            </div>
+        """
+
     with kpi1:
-        st.metric(
-            label="👥 Total Beneficiaries Interviewed",
-            value=f"{total_beneficiaries:,}",
-            delta=f"{len(records)} in active filter" if total_beneficiaries > 0 else None
-        )
+        st.markdown(render_metric_card("Total Beneficiaries", f"{total_beneficiaries:,}", f"{len(records)} in active filter" if total_beneficiaries > 0 else "0", "👥"), unsafe_allow_html=True)
     with kpi2:
-        st.metric(
-            label="🎯 Average NSQF Match Score",
-            value=f"{avg_score}%" if avg_score > 0 else "N/A",
-            delta="Deterministic Fit"
-        )
+        st.markdown(render_metric_card("Avg Match Score", f"{avg_score}%" if avg_score > 0 else "N/A", "Deterministic Fit", "🎯"), unsafe_allow_html=True)
     with kpi3:
-        st.metric(
-            label="💼 Self-Employment Aspirants",
-            value=f"{self_emp_pct}%",
-            delta="PM-AJAY Target"
-        )
+        st.markdown(render_metric_card("Self-Employment", f"{self_emp_pct}%", "PM-AJAY Target", "💼"), unsafe_allow_html=True)
     with kpi4:
         active_dists = len(dist_dist)
-        st.metric(
-            label="📍 Districts Represented",
-            value=f"{active_dists} Districts",
-            delta="Priority SC Clusters"
-        )
+        st.markdown(render_metric_card("Districts Represented", f"{active_dists}", "Priority SC Clusters", "📍"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -257,11 +252,11 @@ def render_dashboard_page():
             for l_name, l_count in lang_dist.items():
                 pct = round((l_count / total_beneficiaries) * 100, 1)
                 safe_name = html.escape(str(l_name))
-                st.markdown(f"""
-                    <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{safe_name}</b>: {l_count} ({pct}%)
+                st.html(f"""
+                    <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px 14px; margin-bottom:8px; color: #2D3748;">
+                        <b>{safe_name}</b>: <span style="color: #64748B;">{l_count} ({pct}%)</span>
                     </div>
-                """, unsafe_allow_html=True)
+                """)
         else:
             st.info("No language data.")
 
@@ -270,11 +265,11 @@ def render_dashboard_page():
         if common_interests:
             for int_name, int_count in common_interests.items():
                 safe_int = html.escape(str(int_name))
-                st.markdown(f"""
-                    <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{safe_int}</b>: {int_count} candidates
+                st.html(f"""
+                    <div style="background:#E8F3EF; border:1px solid #C6E0D5; border-radius:8px; padding:10px 14px; margin-bottom:8px; color: #2D5A4C;">
+                        <b>{safe_int}</b>: <span style="color: #4A5568;">{int_count} candidates</span>
                     </div>
-                """, unsafe_allow_html=True)
+                """)
         else:
             st.info("No interest data.")
 
@@ -283,11 +278,11 @@ def render_dashboard_page():
         if missing_skills:
             for sk_name, sk_count in missing_skills.items():
                 safe_sk = html.escape(str(sk_name))
-                st.markdown(f"""
-                    <div style="background:#FEF3C7; border:1px solid #FDE68A; border-radius:8px; padding:10px 14px; margin-bottom:8px;">
-                        <b>{safe_sk}</b>: {sk_count} need training
+                st.html(f"""
+                    <div style="background:#FDFDFB; border:1px solid #E2E8F0; border-radius:8px; padding:10px 14px; margin-bottom:8px; color: #4A5568;">
+                        <b style="color: #1A202C;">{safe_sk}</b>: {sk_count} need training
                     </div>
-                """, unsafe_allow_html=True)
+                """)
         else:
             st.info("No skill gap data.")
 
@@ -302,13 +297,13 @@ def render_dashboard_page():
         for i, (r_name, r_cnt) in enumerate(list(top_roles_dist.items())[:4]):
             safe_role = html.escape(str(r_name))
             with role_cols[i]:
-                st.markdown(f"""
+                st.html(f"""
                     <div style="background:#FFFFFF; border:1px solid #CBD5E1; border-top:4px solid #2563EB; border-radius:8px; padding:14px; text-align:center;">
                         <b style="color:#1E3A8A; font-size:1.05rem;">{safe_role}</b><br>
                         <span style="font-size:1.3rem; font-weight:700; color:#047857;">{r_cnt}</span>
                         <div style="font-size:0.85rem; color:#64748B;">Beneficiaries Matched</div>
                     </div>
-                """, unsafe_allow_html=True)
+                """)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
